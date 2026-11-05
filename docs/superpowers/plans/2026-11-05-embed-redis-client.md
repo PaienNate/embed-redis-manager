@@ -19,7 +19,7 @@
 - 鉴权由宿主 `Middleware` 提供，库不做内置登录。
 - 仅保留内置 JS viewer，废弃外部脚本自定义 viewer（`ViewerCustom.vue`）及 `{HEX_FILE}` 机制。
 - 前端用 **Vite 新建**（`@vitejs/plugin-vue2`），不沿用 ARDM 的 webpack4；`require('zlib')` 相关的 Brotli/Gzip/Deflate/DeflateRaw viewer 一并去掉（少几个模块而已）。
-- 回复序列化需保留类型（string/int/nil/array/status），二进制走 base64。
+- 回复序列化需保留类型（string/int/nil/array），二进制走 base64；RESP status 回复（如 `SET` 的 `+OK`）经 `Do` 后与 bulk 字符串同为 Go `string`，统一映射为 `{t:"s"}`，不产生独立 status 标签。
 
 ## 审查重点（Review Focus）
 
@@ -94,7 +94,7 @@ git commit -m "feat(redisui): add Config/Connection types and Register"
 - 创建：`redisui/command.go`
 - 创建：`redisui/command_test.go`
 
-- [ ] **步骤 1：编写失败的测试**（用 miniredis，覆盖 string/int/nil/array/status 五种类型）
+- [ ] **步骤 1：编写失败的测试**（用 miniredis，覆盖 string/int/nil/array，以及 status 映射为字符串 五个用例）
 
 ```go
 func TestCommandExecutesViaUniversalClient(t *testing.T) { /* get 返回字符串 */ }
@@ -116,9 +116,9 @@ func TestCommandDisabledConnReturns404(t *testing.T) { /* Enabled=false → 404 
 
 签名：`func (s *server) handleCommand(w http.ResponseWriter, r *http.Request)`；用 `redis.NewCmd(args...)` + `client.Do(ctx, cmd)` 执行。修复序列化采用带类型标签的 JSON：
 ```
-{ "t":"s","v":"..." } | { "t":"i","v":123 } | { "t":"a","v":[...] } | { "t":"n" } | { "t":"status","v":"OK" } | { "t":"b","v":"<base64>" }
+{ "t":"s","v":"..." } | { "t":"i","v":123 } | { "t":"a","v":[...] } | { "t":"n" } | { "t":"b","v":"<base64>" }
 ```
-规则：`binary=true` 时 bulk 字符串/数组元素按 base64 编成 `t:"b"`；否则按 Go 返回类型映射到 `s/i/a/n/status`；`*redis.Cmd` 出错时 `error` 字段填 Redis 错误消息、`reply` 置 null。连接不存在或 `!Enabled` → `404`。
+规则：`binary=true` 时 bulk 字符串/数组元素按 base64 编成 `t:"b"`；否则按 Go 返回类型映射到 `s/i/a/n`（status 与 bulk 同为 Go `string`，均映射为 `s`）；`*redis.Cmd` 出错时 `error` 字段填 Redis 错误消息、`reply` 置 null。连接不存在或 `!Enabled` → `404`。
 
 - [ ] **步骤 4：运行测试验证通过**
 
