@@ -49,17 +49,21 @@ import KeyListVirtualTree from '@/components/KeyListVirtualTree';
 // one key (a Buffer) at a time while streaming cursor pages, whereas the
 // original ioredis scanStream emitted page arrays through `on('data')` and
 // supported `pause()`/`resume()` (used for "load more"). This adapter turns the
-// async iterable back into that shape: each `data` event carries an array of
-// keys, and `pause()`/`resume()` gate the underlying `next()` calls so the
-// generator keeps its cursor between pages.
-function createScanStream(iterable) {
+// async iterable back into that shape: keys are buffered and flushed to `data`
+// as page-sized arrays (matching ioredis semantics), and `pause()`/`resume()`
+// gate the underlying `next()` calls so the generator keeps its cursor between
+// pages. Batching also avoids the O(n^2) cost of re-concatenating the key list
+// one key at a time when loading many keys.
+function createScanStream(iterable, batchSize) {
   const listeners = { data: [], error: [], end: [] };
   const iterator = iterable && iterable[Symbol.asyncIterator]
     ? iterable[Symbol.asyncIterator]()
     : iterable;
+  const batch = batchSize || 500;
 
   let paused = false;
   let pumping = false;
+  let buffer = [];
 
   const stream = {
     on(event, fn) {
@@ -86,6 +90,15 @@ function createScanStream(iterable) {
     },
   };
 
+  const flush = () => {
+    if (!buffer.length) {
+      return;
+    }
+    const batchOut = buffer;
+    buffer = [];
+    stream.emit('data', batchOut);
+  };
+
   const pump = async () => {
     if (pumping) {
       return;
@@ -95,10 +108,14 @@ function createScanStream(iterable) {
       while (!paused) {
         const { value, done } = await iterator.next();
         if (done) {
+          flush();
           stream.emit('end');
           break;
         }
-        stream.emit('data', [value]);
+        buffer.push(value);
+        if (buffer.length >= batch) {
+          flush();
+        }
       }
     } catch (e) {
       stream.emit('error', e);
@@ -228,7 +245,7 @@ export default {
         // scan count is bigger when in search mode
         scanOption.match != '*' && (scanOption.count = this.searchPageSize);
 
-        const stream = createScanStream(node.scanBufferStream(scanOption));
+        const stream = createScanStream(node.scanBufferStream(scanOption), scanOption.count);
         this.scanStreams.push(stream);
 
         stream.on('data', (keys) => {
