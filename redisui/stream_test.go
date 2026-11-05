@@ -302,9 +302,9 @@ func (f *fakeSession) Send(msg string) error {
 }
 
 func (f *fakeSession) Close(status uint32, reason string) error { f.close(); return nil }
-func (f *fakeSession) ID() string                              { return "fake" }
+func (f *fakeSession) ID() string                               { return "fake" }
 func (f *fakeSession) Request() *http.Request                   { return nil }
-func (f *fakeSession) GetSessionState() sockjs.SessionState      { return sockjs.SessionActive }
+func (f *fakeSession) GetSessionState() sockjs.SessionState     { return sockjs.SessionActive }
 func (f *fakeSession) close()                                   { f.once.Do(func() { close(f.in) }) }
 
 func TestRunStreamEndToEnd(t *testing.T) {
