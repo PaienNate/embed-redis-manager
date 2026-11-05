@@ -270,11 +270,38 @@ export default {
       this.initSortable();
     },
     initConnections() {
-      this.connections = storage.getConnections(true).map((item) => {
-        item.connectionName = storage.getConnectionName(item);
-        // fix history bug, prevent db into config
-        delete item.db;
-        return item;
+      // Embedded build: the connection list is injected by the Go backend and
+      // served at {apiBase}/connections as [{id,name,enabled}]. Connections are
+      // managed by the host (no "new connection" dialog), so we fetch instead of
+      // reading the user's locally-saved connections.
+      this.fetchConnections();
+    },
+    async fetchConnections() {
+      const apiBase =
+        (typeof window !== 'undefined' && window.__REDISUI__ && window.__REDISUI__.apiBase) || '/api';
+      const base = String(apiBase).replace(/\/+$/, '');
+
+      let list = [];
+      try {
+        const resp = await fetch(`${base}/connections`);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        list = await resp.json();
+      } catch (e) {
+        // backend unreachable: show an empty list rather than crashing the menu
+        list = [];
+      }
+
+      this.connections = (list || []).map((item) => {
+        // Normalize the backend DTO into the shape the connection tree expects:
+        // `id` doubles as the connID, `name` becomes the display `connectionName`.
+        const normalized = { ...item };
+        normalized.id = item.id;
+        normalized.name = item.name;
+        normalized.connectionName = item.name;
+        normalized.key = item.id;
+        return normalized;
       });
       this.initGroups();
     },

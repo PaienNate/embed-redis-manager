@@ -160,18 +160,10 @@ export default {
       // select db
       configCopy.db = this.lastSelectedDb;
 
-      // ssh client
-      if (configCopy.sshOptions) {
-        var clientPromise = redisClient.createSSHConnection(
-          configCopy.sshOptions, configCopy.host, configCopy.port, configCopy.auth, configCopy,
-        );
-      }
-      // normal client
-      else {
-        var clientPromise = redisClient.createConnection(
-          configCopy.host, configCopy.port, configCopy.auth, configCopy,
-        );
-      }
+      // Embedded build: connections are pre-established by the backend and
+      // identified by the backend-provided `id` (the connID), so we create an
+      // HttpRedisClient proxy bound to it instead of a direct redis socket.
+      const clientPromise = redisClient.createConnection(configCopy.id);
 
       clientPromise.then((client) => {
         this.client = client;

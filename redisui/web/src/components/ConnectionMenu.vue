@@ -29,15 +29,6 @@
         <el-dropdown-item @click.native='closeConnection'>
           <span><i class='more-operate-ico fa fa-power-off'></i>&nbsp;{{ $t('message.close_connection') }}</span>
         </el-dropdown-item>
-        <el-dropdown-item @click.native='showEditConnection'>
-          <span><i class='more-operate-ico el-icon-edit-outline'></i>&nbsp;{{ $t('message.edit_connection') }}</span>
-        </el-dropdown-item>
-        <el-dropdown-item @click.native='deleteConnection'>
-          <span><i class='more-operate-ico el-icon-delete'></i>&nbsp;{{ $t('message.del_connection') }}</span>
-        </el-dropdown-item>
-        <el-dropdown-item @click.native='duplicateConnection'>
-          <span><i class='more-operate-ico fa fa-clone'></i>&nbsp;{{ $t('message.duplicate_connection') }}</span>
-        </el-dropdown-item>
 
         <!-- menu color picker -->
         <el-tooltip placement="right" effect="light">
@@ -75,20 +66,10 @@
   <div :title="connectionTitle()" class="connection-name">{{config.connectionName}}
     <!-- <i v-if="client" style="position: absolute; left: 2px; bottom: 5px; width: 8px; height: 8px; border-radius: 4px; background-color: green;"></i> -->
   </div>
-
-  <!-- edit connection dialog -->
-  <NewConnectionDialog
-    editMode='true'
-    :config='config'
-    @editConnectionFinished='editConnectionFinished'
-    ref='editConnectionDialog'>
-  </NewConnectionDialog>
 </div>
 </template>
 
 <script type="text/javascript">
-import storage from '@/storage.js';
-import NewConnectionDialog from '@/components/NewConnectionDialog';
 import splitargs from '@qii404/redis-splitargs';
 
 export default {
@@ -98,17 +79,6 @@ export default {
     };
   },
   props: ['config', 'client'],
-  components: { NewConnectionDialog },
-  created() {
-    this.$bus.$on('duplicateConnection', (newConfig) => {
-      // not self
-      if (this.config.name !== newConfig.name) {
-        return;
-      }
-
-      this.showEditConnection();
-    });
-  },
   methods: {
     connectionTitle() {
       const { config } = this;
@@ -145,60 +115,12 @@ export default {
     refreshConnection() {
       this.$emit('refreshConnection');
     },
-    showEditConnection() {
-      // connection is cloesd, do not display confirm
-      if (!this.client) {
-        return this.$refs.editConnectionDialog.show();
-      }
-
-      this.$confirm(
-        this.$t('message.close_to_edit_connection'),
-        { type: 'warning' },
-      ).then(() => {
-        this.$bus.$emit('closeConnection', this.config.connectionName);
-        this.$refs.editConnectionDialog.show();
-      }).catch(() => {});
-    },
     closeConnection() {
       this.$confirm(
         this.$t('message.close_to_connection'),
         { type: 'warning' },
       ).then(() => {
         this.$bus.$emit('closeConnection', this.config.connectionName);
-      }).catch(() => {});
-    },
-    editConnectionFinished(newConfig) {
-      this.$bus.$emit('refreshConnections');
-    },
-    duplicateConnection() {
-      // empty key\order , just as a new connection
-      const newConfig = {
-        ...this.config,
-        key: undefined,
-        order: undefined,
-        connectionName: undefined,
-      };
-
-      storage.addConnection(newConfig);
-
-      this.$bus.$emit('refreshConnections');
-      // 100ms after connection list is ready
-      setTimeout(() => {
-        this.$bus.$emit('duplicateConnection', newConfig);
-      }, 100);
-    },
-    deleteConnection() {
-      this.$confirm(
-        this.$t('message.confirm_to_delete_connection'),
-        { type: 'warning' },
-      ).then(() => {
-        storage.deleteConnection(this.config);
-        this.$bus.$emit('refreshConnections');
-
-        this.$message.success({
-          message: this.$t('message.delete_success'),
-          duration: 1000,
-        });
       }).catch(() => {});
     },
     openStatus() {
