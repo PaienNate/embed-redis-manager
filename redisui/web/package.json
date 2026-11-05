@@ -1,0 +1,41 @@
+{
+  "name": "redisui-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Embedded Redis client UI (Vite + Vue2), sourced from AnotherRedisDesktopManager",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@qii404/json-bigint": "^1.0.0",
+    "@qii404/redis-splitargs": "^1.0.1",
+    "@qii404/vue-easy-tree": "^1.0.10",
+    "algo-msgpack-with-bigint": "^2.1.1",
+    "buffer": "^6.0.3",
+    "element-ui": "^2.15.14",
+    "font-awesome": "^4.7.0",
+    "getopts": "^2.3.0",
+    "java-object-serialization": "^0.1.1",
+    "keymaster": "^1.6.2",
+    "monaco-editor": "^0.30.1",
+    "node-version-compare": "^1.0.3",
+    "php-serialize": "^4.0.2",
+    "pickleparser": "^0.2.1",
+    "protobufjs": "^6.11.4",
+    "rawproto": "^0.7.6",
+    "sortablejs": "^1.14.0",
+    "vue": "2.7.16",
+    "vue-i18n": "^8.28.2",
+    "vxe-table": "3.9.0-rc.23"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue2": "^2.3.3",
+    "sass": "^1.77.8",
+    "vite": "^5.4.8"
+  },
+  "overrides": {
+    "vue": "2.7.16"
+  }
+}
