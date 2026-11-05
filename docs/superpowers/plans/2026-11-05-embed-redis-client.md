@@ -6,7 +6,7 @@
 
 **架构：** 前端保留 ARDM 的 Vue2 UI，用一块"ioredis 兼容"的 `HttpRedisClient` 代理把 Redis 操作改成 HTTP 转发；Go 库用 `redis.NewCmd` 提供泛化命令端点，用 `go:embed` 打包前端产物，注册到一个 `http.ServeMux` 前缀下。流式（MONITOR/pub-sub）走 SockJS 单通道。
 
-**技术栈：** Go 1.26、`github.com/redis/go-redis/v9`、`github.com/igm/sockjs-go/sockjs`；前端 Vue2 + Element UI + webpack 4（从 ARDM fork 适配）、`sockjs-client`；测试 `github.com/alicebob/miniredis/v2`、vitest。
+**技术栈：** Go 1.26、`github.com/redis/go-redis/v9`、`github.com/igm/sockjs-go/sockjs`；前端 Vue2 + Element UI + **Vite**（`@vitejs/plugin-vue2`）、`sockjs-client`；测试 `github.com/alicebob/miniredis/v2`、vitest。
 
 **规格：** `docs/superpowers/specs/2026-11-05-embed-redis-client-design.md`（两份都要读，计划以规格为依据）。
 
@@ -18,6 +18,7 @@
 - 流式只用 SockJS（服务端 `sockjs-go`，前端 `sockjs-client`），降级顺序 WebSocket→XHR-streaming→XHR-polling。
 - 鉴权由宿主 `Middleware` 提供，库不做内置登录。
 - 仅保留内置 JS viewer，废弃外部脚本自定义 viewer（`ViewerCustom.vue`）及 `{HEX_FILE}` 机制。
+- 前端用 **Vite 新建**（`@vitejs/plugin-vue2`），不沿用 ARDM 的 webpack4；`require('zlib')` 相关的 Brotli/Gzip/Deflate/DeflateRaw viewer 一并去掉（少几个模块而已）。
 - 回复序列化需保留类型（string/int/nil/array/status），二进制走 base64。
 
 ## 审查重点（Review Focus）
@@ -131,42 +132,42 @@ git add redisui/command.go redisui/command_test.go
 git commit -m "feat(redisui): add generic command endpoint with typed replies"
 ```
 
-### 任务 3：前端构建流水线（从 ARDM 复制适配 + 产出 dist）
+### 任务 3：新建 Vite + Vue2 前端并产出 dist
 
 **文件：**
-- 创建：`redisui/web/`（从 `reference/` 复制 `src`、`build`、`config`、`index.html`、`package.json`、`babel.config.json`、`.postcssrc.js`、`element-variables.scss` 等）
-- 修改：`redisui/web/build/webpack.base.conf.js`（`target: 'web'`，`node` 字段去掉 `fs/net/tls/child_process` 的 empty，改合理处理）
-- 修改：`redisui/web/config/index.js`（`build.assetsPublicPath: '/'`）
-- 修改：`redisui/web/package.json`（去掉 `electron`、`electron-builder`、`tunnel-ssh` 及 pack 脚本；加 `sockjs-client`）
-- 创建：`redisui/web/dist/`（构建产物，**必须 commit**；理由：`//go:embed` 模式相对 .go 文件所在目录，放这里才能被 `redisui/embed.go` 的 `//go:embed redisui/web/dist` 引用）
+- 创建：`redisui/web/package.json`（`vue`、`element-ui`、`vue-i18n`、`@qii404/json-bigint`、`@qii404/redis-splitargs`、`@qii404/vue-easy-tree`、`algo-msgpack-with-bigint`、`java-object-serialization`、`php-serialize`、`pickleparser`、`protobufjs`、`rawproto`、`monaco-editor`、`vxe-table`、`keymaster`、`getopts`、`sortablejs`、`font-awesome`、`node-version-compare`、`sockjs-client`；devDeps：`vite`、`@vitejs/plugin-vue2`）
+- 创建：`redisui/web/vite.config.js`（`@vitejs/plugin-vue2`；`resolve.alias` 配 `@`→`src`、`vue$`→`vue/dist/vue.esm.js`；`build.outDir='dist'`；`optimizeDeps` 包含 CJS 依赖）
+- 创建：`redisui/web/index.html`（SPA 入口，挂 `#app`）
+- 创建：`redisui/web/src/`（从 `reference/src` 复制并清理，见步骤 1）
+- 创建：`redisui/web/dist/`（构建产物，**必须 commit**；理由：`//go:embed` 模式相对 .go 文件所在目录，放这里才能被 `redisui/embed.go` 的 `//go:embed web/dist` 引用）
 
-- [ ] **步骤 1：复制 ARDM 前端到 `redisui/web/` 并去掉 Electron 依赖**
+- [ ] **步骤 1：新建 Vite 骨架并复制、清理 ARDM `src`**
 
-复制 `reference/` 的 `src`、`build`、`config`、`index.html`、`package.json`、`babel.config.json`、`.postcssrc.js`、`element-variables.scss` 到 `redisui/web/`。在 `redisClient.js`、`shortcut.js`、`addon.js`、各 `ViewerCustom.vue`/`UpdateCheck.vue`/`FileInput.vue` 等里删除 `import { remote/ipcRenderer } from 'electron'`、`child_process`、`tunnel-ssh`、`fs` 相关代码（本任务先把能删的删了，编译可通过即可，业务适配交给后续任务）。
+用 Vite 建 Vue2 骨架（`package.json` + `vite.config.js` + `index.html` + `src/main.js`），把 `reference/src` 源码复制进 `redisui/web/src/`。清理项：
+- 删除所有 `electron`/`remote`/`ipcRenderer`/`child_process`/`tunnel-ssh`/`fs`/`readline`/`path` 引用（`redisClient.js`、`shortcut.js`、`addon.js`、`Setting.vue`、`KeyListVirtualTree.vue`、`ConnectionMenu.vue`、`ViewerProtobuf.vue`、`ViewerCustom.vue` 等）。
+- 删除 `ViewerCustom.vue`；删除依赖 node `zlib` 的 `ViewerBrotli.vue`、`ViewerGzip.vue`、`ViewerDeflate.vue`、`ViewerDeflateRaw.vue`（按约定去掉这几个模块）。
+- 把 `require('@qii404/json-bigint')`、`require('protobufjs/minimal')` 改为 `import`。
+- `main.js` 里 `process.on('uncaughtException')` 等 node 调用移除或做浏览器适配。
 
-- [ ] **步骤 2：调整 webpack 为 web target**
-
-`redisui/web/build/webpack.base.conf.js`：`target` 改为 `'web'`；`node` 块移除 mock 或改为 `false`。
-
-- [ ] **步骤 3：执行构建**
+- [ ] **步骤 2：执行构建**
 
 运行：`cd redisui/web && npm install && npm run build`
-预期：`redisui/web/dist/index.html` + `redisui/web/dist/static/...` 生成，无报错。
+预期：`redisui/web/dist/index.html` + `redisui/web/dist/assets/...` 生成，无报错。
 
-- [ ] **步骤 4：验证可访问性（跑一次）**
+- [ ] **步骤 3：验证可访问性（跑一次）**
 
 用 `python3 -m http.server` 起在 `redisui/web/dist`，浏览器打开确认 SPA 正常渲染（前后端未联调，连接列表暂时为空属预期）。
 
-- [ ] **步骤 5：Commit**
+- [ ] **步骤 4：Commit**
 
 ```bash
-git add redisui/web/ && git commit -m "build(web): fork ARDM frontend as web target SPA"
+git add redisui/web/ && git commit -m "build(web): scaffold Vite+Vue2 frontend from ARDM src"
 ```
 
 ### 任务 4：Go 静态资源嵌入与连接列表联调
 
 **文件：**
-- 创建：`redisui/embed.go`（含 `//go:embed all:redisui/web/dist` 的 embed 变量）
+- 创建：`redisui/embed.go`（含 `//go:embed all:web/dist` 的 embed 变量）
 - 修改：`redisui/redisui.go`、`redisui/redisui_test.go`
 - 创建：`redisui/embed_test.go`
 
@@ -184,7 +185,7 @@ func TestStaticAssetServed(t *testing.T) { /* GET {prefix}/static/js/*.js 返回
 
 - [ ] **步骤 3：实现 embed 与静态文件服务**
 
-`redisui/embed.go` 用 `//go:embed all:redisui/web/dist` 声明 `var distFS embed.FS`；`redisui.go` 的 `server` 增加 `frontend fs.FS`，用 `http.FileServerFS`（或用 `http.FileServer` 包一层）挂到 `{prefix}/`，并处理 SPA 的 history 回落到 `index.html`。因为 `redisui/embed.go` 与 `redisui/web/dist` 同仓库层级，`//go:embed redisui/web/dist` 可直接命中。
+`redisui/embed.go` 用 `//go:embed all:web/dist` 声明 `var distFS embed.FS`；`redisui.go` 的 `server` 增加 `frontend fs.FS`，用 `http.FileServerFS`（或用 `http.FileServer` 包一层）挂到 `{prefix}/`，并处理 SPA 的 history 回落到 `index.html`。因为 `redisui/embed.go` 与 `redisui/web/dist` 同仓库层级，`//go:embed web/dist` 可直接命中。
 
 - [ ] **步骤 4：运行测试验证通过**
 
@@ -292,7 +293,7 @@ git commit -m "feat(redisui,web): key browse, search and dbsize"
 
 **文件：**
 - 修改：`redisui/web/src/components/contents/KeyContentString.vue`、`KeyContentHash.vue`、`KeyContentList.vue`、`KeyContentSet.vue`、`KeyContentZset.vue`
-- 修改：`redisui/web/src/components/KeyHeader.vue`、`FormatViewer.vue`（保留内置 viewer，去外部脚本）
+- 修改：`redisui/web/src/components/KeyHeader.vue`、`FormatViewer.vue`（保留内置 viewer，去外部脚本；Brotli/Gzip/Deflate/DeflateRaw 已在任务 3 删除，不再出现）
 - 调整：`redisui/command.go`（需要时补充 bulk/base64 与错误分支测试）
 
 - [ ] **步骤 1：逐个类型接通代理**

@@ -21,6 +21,8 @@
 | 前端构建产物 | **commit 进仓库**，宿主 `go build` 时用 `go:embed` 打进二进制，宿主无需安装 node |
 | 实时流式通道 | **SockJS**（`sockjs-go` 服务端 + `sockjs-client` 前端），自动在 WebSocket → XHR-streaming → XHR-polling 间降级，适配政企/受限网络 |
 | 自定义脚本查看器 | **废弃**，只保留内置 JS viewer；不引入 Go formatter 接口 |
+| 前端构建方式 | **Vite + Vue2**（`@vitejs/plugin-vue2`），不沿用 ARDM 的 webpack4 |
+| zlib 依赖 viewer | Brotli / Gzip / Deflate / DeflateRaw 一并去掉（依赖 node `zlib`，浏览器无法直接用，模块价值低） |
 
 ## 3. 对 ARDM 架构的关键洞察
 
@@ -137,7 +139,7 @@ func Register(mux *http.ServeMux, cfg Config) error
 
 ### 内置 viewer 保留
 
-json / gzip / brotli / msgpack / protobuf / deflate / deflateRaw / hex / binary / php / pickle / java serialize 等（纯客户端 JS 库）原样保留。仅移除"Custom（外部脚本）"这一项。
+json / msgpack / protobuf / hex / binary / php / pickle / java serialize 等（纯客户端 JS 库）原样保留。移除"Custom（外部脚本）"这一项；同时移除依赖 node `zlib` 的 Brotli / Gzip / Deflate / DeflateRaw viewer。
 
 ## 10. 构建与嵌入
 
@@ -168,6 +170,7 @@ json / gzip / brotli / msgpack / protobuf / deflate / deflateRaw / hex / binary 
 - 不做内置登录鉴权（交给宿主的中间件）。
 - 不做"新建连接"入口（连接由宿主注入）。
 - 不做外部脚本自定义 viewer（spawn 进程）及 `{HEX_FILE}` 临时文件机制。
+- 不做 Brotli / Gzip / Deflate / DeflateRaw viewer（依赖 node `zlib`）及其它 node 原生能力。
 - 不引入 WebSocket / SSE 作为流式主通道（用 SockJS 单通道覆盖并自动降级）。
 
 ## 14. 安全考量
