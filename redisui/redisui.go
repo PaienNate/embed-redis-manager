@@ -54,6 +54,12 @@ func Register(mux *http.ServeMux, cfg Config) error {
 		handler = cfg.Middleware(handler)
 	}
 	mux.Handle("GET "+prefix+"/api/connections", handler)
+
+	var cmdHandler http.Handler = http.HandlerFunc(s.handleCommand)
+	if cfg.Middleware != nil {
+		cmdHandler = cfg.Middleware(cmdHandler)
+	}
+	mux.Handle("POST "+prefix+"/api/redis/{connID}/command", cmdHandler)
 	return nil
 }
 
