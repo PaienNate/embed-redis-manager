@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue2';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { fileURLToPath, URL } from 'node:url';
 
 // https://vitejs.dev/config/
@@ -7,7 +8,19 @@ export default defineConfig({
   // relative base so the built SPA can be served under any host prefix
   // (e.g. /redisui/) via the Go backend; asset refs become ./assets/...
   base: './',
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    // provide browser globals (Buffer/process/global/globalThis) used directly
+    // across components; the browser runtime has none of these by default.
+    nodePolyfills({
+      globals: {
+        Buffer: true,
+        process: true,
+        global: true,
+        globalThis: true,
+      },
+    }),
+  ],
   resolve: {
     extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json', '.vue', '.scss'],
     alias: {
