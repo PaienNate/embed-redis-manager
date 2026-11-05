@@ -31,6 +31,10 @@ export default class RedisStream {
     this._listeners = { open: [], message: [], error: [], close: [] };
     this._sock = null;
     this._connected = false;
+    // The most recent subscription intent (monitor / subscribe / psubscribe and
+    // its params). A SockJS reconnect opens a brand new server session that has
+    // no subscription, so we replay this on every (re)open. Cleared by stop().
+    this._lastControl = null;
 
     // Optional transport override (e.g. "xhr-streaming" or "xhr-polling") for
     // testing the degradation path under a blocked WebSocket network.
@@ -45,6 +49,12 @@ export default class RedisStream {
 
     sock.onopen = () => {
       this._connected = true;
+      // Reconnect creates a fresh session on the server with no subscription.
+      // Re-issue the last control message so monitor/pub-sub survive a
+      // reconnect (only an explicit stop clears _lastControl).
+      if (this._lastControl) {
+        this._sock.send(JSON.stringify(this._lastControl));
+      }
       this._emit('open');
     };
     sock.onmessage = (e) => {
@@ -72,19 +82,28 @@ export default class RedisStream {
   }
 
   monitor() {
-    this.send({ type: 'monitor' });
+    this._setControl({ type: 'monitor' });
   }
 
   subscribe(channels) {
-    this.send({ type: 'subscribe', channels: channels || [] });
+    this._setControl({ type: 'subscribe', channels: channels || [] });
   }
 
   psubscribe(patterns) {
-    this.send({ type: 'psubscribe', patterns: patterns || [] });
+    this._setControl({ type: 'psubscribe', patterns: patterns || [] });
   }
 
   stop() {
+    this._lastControl = null;
     this.send({ type: 'stop' });
+  }
+
+  // _setControl records the intent so it can be replayed on reconnect, then
+  // sends it (only if the session is currently connected; if not yet open the
+  // intent is captured and replayed by the onopen handler).
+  _setControl(obj) {
+    this._lastControl = obj;
+    this.send(obj);
   }
 
   isConnected() {
