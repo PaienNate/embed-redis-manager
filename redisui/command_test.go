@@ -102,6 +102,35 @@ func TestCommandBinaryReplyBase64(t *testing.T) {
 	assertReply(t, rec, `{"t":"b","v":"`+want+`"}`)
 }
 
+func TestCommandBinaryArgRoundTrip(t *testing.T) {
+	// A value containing non-UTF-8 / NUL bytes must survive a write through a
+	// typed binary arg ({t:"b"}) and read back byte-for-byte via binary=true.
+	c := miniredisClient(t)
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+
+	data := []byte{0x00, 0x01, 0xfe, 0xff, 'a', 0x7f}
+	encoded := base64.StdEncoding.EncodeToString(data)
+	rec := doCommand(t, mux, "c1",
+		`{"cmd":"set","args":[{"t":"s","v":"bin"},{"t":"b","v":"`+encoded+`"}]}`)
+	assertReply(t, rec, `{"t":"s","v":"OK"}`)
+
+	rec = doCommand(t, mux, "c1", `{"cmd":"get","args":["bin"],"binary":true}`)
+	assertReply(t, rec, `{"t":"b","v":"`+encoded+`"}`)
+}
+
+func TestCommandMixedStringAndBinaryArgs(t *testing.T) {
+	// Both plain-string args (legacy) and typed args are accepted in one call.
+	c := miniredisClient(t)
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+
+	rec := doCommand(t, mux, "c1", `{"cmd":"hset","args":[{"t":"s","v":"h"},{"t":"b","v":"`+
+		base64.StdEncoding.EncodeToString([]byte("f"))+`"},{"t":"s","v":"v"}]}`)
+	assertReply(t, rec, `{"t":"i","v":1}`)
+
+	rec = doCommand(t, mux, "c1", `{"cmd":"hget","args":["h","f"],"binary":true}`)
+	assertReply(t, rec, `{"t":"b","v":"`+base64.StdEncoding.EncodeToString([]byte("v"))+`"}`)
+}
+
 func TestCommandStatusReplyMappedAsString(t *testing.T) {
 	// SET returns a status reply ("OK"); go-redis exposes it as a plain Go
 	// string, indistinguishable from a bulk string, so by Go-type mapping it

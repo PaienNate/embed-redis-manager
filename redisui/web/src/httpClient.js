@@ -60,11 +60,17 @@ export default class HttpRedisClient {
   }
 
   async _send(cmd, args, binary) {
-    // Args are forwarded to Go verbatim as command arguments and the backend
-    // decodes them into a []string, so every arg must be a string: Buffers are
-    // converted to their UTF-8 form (matching how the value was read back as a
-    // Buffer) and numbers (e.g. LRANGE start/stop) are stringified.
-    const encodedArgs = args.map((a) => (Buffer.isBuffer(a) ? a.toString() : String(a)));
+    // Args are forwarded to Go as *typed* command arguments so arbitrary
+    // non-UTF-8 bytes round-trip: Buffers/Uint8Arrays become {t:"b"} carrying
+    // base64 (decoded to []byte by the backend and sent to redis as a
+    // binary-safe bulk), everything else becomes {t:"s"} (a plain string; the
+    // backend stringifies numbers, e.g. LRANGE start/stop, on its side).
+    const encodedArgs = args.map((a) => {
+      if (Buffer.isBuffer(a) || a instanceof Uint8Array) {
+        return { t: 'b', v: Buffer.from(a).toString('base64') };
+      }
+      return { t: 's', v: String(a) };
+    });
 
     const resp = await fetch(this.url, {
       method: 'POST',

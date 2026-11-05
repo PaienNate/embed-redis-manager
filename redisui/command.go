@@ -9,13 +9,22 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// commandArg is a single typed command argument. T is "s" for a plain string
+// (V is the raw value) or "b" for a binary-safe argument (V is base64). The
+// latter lets the frontend round-trip arbitrary non-UTF-8 bytes without being
+// mangled by JSON, because redis keys/values are byte sequences.
+type commandArg struct {
+	T string `json:"t"`
+	V string `json:"v"`
+}
+
 // commandRequest is the POST body accepted by the generic command endpoint.
-// Args are string command arguments; Binary selects base64-encoded bulk
-// string replies (bulk strings and array elements).
+// Args are typed command arguments (see commandArg); Binary selects
+// base64-encoded bulk string replies (bulk strings and array elements).
 type commandRequest struct {
-	Cmd    string   `json:"cmd"`
-	Args   []string `json:"args"`
-	Binary bool     `json:"binary"`
+	Cmd    string            `json:"cmd"`
+	Args   []json.RawMessage `json:"args"`
+	Binary bool              `json:"binary"`
 }
 
 // typedReply is the tagged JSON envelope for a single Redis reply value:
@@ -65,8 +74,13 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 	args := make([]interface{}, 0, len(req.Args)+1)
 	args = append(args, req.Cmd)
-	for _, a := range req.Args {
-		args = append(args, a)
+	for _, raw := range req.Args {
+		arg, err := decodeCommandArg(raw)
+		if err != nil {
+			http.Error(w, "redisui: invalid command argument: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		args = append(args, arg)
 	}
 
 	cmd := conn.Client.Do(r.Context(), args...)
@@ -83,6 +97,34 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 	reply := serializeReply(cmd.Val(), req.Binary)
 	writeCommandResponse(w, nil, &reply)
+}
+
+// decodeCommandArg turns one raw JSON argument into a Go value safe to pass to
+// go-redis. It accepts a typed object ({t:"b"|"s", v}) and, for backward
+// compatibility with earlier clients, a bare JSON string (treated as "s").
+func decodeCommandArg(raw json.RawMessage) (interface{}, error) {
+	// legacy: a plain JSON string argument
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, nil
+	}
+
+	var a commandArg
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return nil, fmt.Errorf("argument must be a string or {t,v} object")
+	}
+	switch a.T {
+	case "b":
+		b, err := base64.StdEncoding.DecodeString(a.V)
+		if err != nil {
+			return nil, fmt.Errorf("bad base64 in binary arg: %v", err)
+		}
+		return b, nil
+	case "s", "":
+		return a.V, nil
+	default:
+		return nil, fmt.Errorf("unknown argument type %q", a.T)
+	}
 }
 
 // serializeReply maps a Redis reply value to its tagged JSON representation.

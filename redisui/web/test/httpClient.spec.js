@@ -25,7 +25,25 @@ describe('HttpRedisClient', () => {
     const [url, init] = fetch.mock.calls[0];
     expect(url).toBe('/api/redis/conn1/command');
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ cmd: 'SET', args: ['k', 'v'], binary: false });
+    expect(JSON.parse(init.body)).toEqual({
+      cmd: 'SET',
+      args: [{ t: 's', v: 'k' }, { t: 's', v: 'v' }],
+      binary: false,
+    });
+  });
+
+  it('call encodes Buffer args as base64 binary args', async () => {
+    fetch.mockResolvedValue(jsonResponse({ error: null, reply: { t: 's', v: 'OK' } }));
+
+    const client = new HttpRedisClient('conn1');
+    await client.set(Buffer.from('key'), Buffer.from([0x00, 0x01, 0xff]));
+
+    const [, init] = fetch.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.cmd).toBe('SET');
+    expect(body.args[0]).toEqual({ t: 'b', v: Buffer.from('key').toString('base64') });
+    expect(body.args[1]).toEqual({ t: 'b', v: Buffer.from([0x00, 0x01, 0xff]).toString('base64') });
+    expect(body.binary).toBe(false);
   });
 
   it('callBuffer decodes base64 to Buffer', async () => {
@@ -108,7 +126,7 @@ describe('HttpRedisClient scanBufferStream', () => {
     const [, init1] = fetch.mock.calls[0];
     expect(JSON.parse(init1.body)).toEqual({
       cmd: 'SCAN',
-      args: ['0', 'MATCH', '*', 'COUNT', '2'],
+      args: [{ t: 's', v: '0' }, { t: 's', v: 'MATCH' }, { t: 's', v: '*' }, { t: 's', v: 'COUNT' }, { t: 's', v: '2' }],
       binary: true,
     });
   });
