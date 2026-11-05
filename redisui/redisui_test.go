@@ -241,3 +241,41 @@ func TestRegisterNilMuxErrors(t *testing.T) {
 		t.Fatal("Register(nil, ...) expected error, got nil")
 	}
 }
+
+func TestRegisterRejectsRootPrefix(t *testing.T) {
+	// A prefix resolving to "/" would mount the frontend catch-all on the mux
+	// root and swallow every host route; Register must refuse it outright.
+	for _, prefix := range []string{"/", "///", " / "} {
+		mux := http.NewServeMux()
+		err := Register(mux, Config{Prefix: prefix, Connections: []Connection{
+			{ID: "c1", Name: "c1", Client: miniredisClient(t), Enabled: true},
+		}})
+		if err == nil {
+			t.Fatalf("Register(Prefix=%q): want error, got nil", prefix)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/connections", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("Register(Prefix=%q) mounted routes on the mux root: status = %d, want 404", prefix, rec.Code)
+		}
+	}
+}
+
+func TestRegisterRejectsDuplicateConnectionID(t *testing.T) {
+	mux := http.NewServeMux()
+	err := Register(mux, Config{Prefix: "/r", Connections: []Connection{
+		{ID: "dup", Name: "first", Client: miniredisClient(t), Enabled: true},
+		{ID: "dup", Name: "second", Client: miniredisClient(t), Enabled: true},
+	}})
+	if err == nil {
+		t.Fatal("Register with duplicate connection IDs: want error, got nil")
+	}
+	// nothing may be mounted when registration fails
+	req := httptest.NewRequest(http.MethodGet, "/r/api/connections", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("failed Register still mounted routes: status = %d", rec.Code)
+	}
+}

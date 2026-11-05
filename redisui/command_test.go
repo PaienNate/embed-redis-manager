@@ -357,3 +357,14 @@ func TestCommandDBSize(t *testing.T) {
 	rec := doCommand(t, mux, "c1", `{"cmd":"dbsize"}`)
 	assertReply(t, rec, `{"t":"i","v":3}`)
 }
+
+func TestCommandRequestBodyTooLargeRejected(t *testing.T) {
+	c := miniredisClient(t)
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+	// body one KiB over the 32 MiB cap
+	body := `{"cmd":"set","args":["k","` + strings.Repeat("a", maxCommandBodyBytes+1024) + `"]}`
+	rec := doCommand(t, mux, "c1", body)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", rec.Code, rec.Body.String())
+	}
+}

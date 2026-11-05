@@ -1,13 +1,22 @@
 package redisui
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// maxCommandBodyBytes caps the request body accepted by the generic command
+// endpoint (spec §14: size-limit protection). Larger bodies are rejected
+// with 413 instead of being buffered unboundedly.
+const maxCommandBodyBytes = 32 << 20 // 32 MiB
 
 // commandArg is a single typed command argument. T is "s" for a plain string
 // (V is the raw value) or "b" for a binary-safe argument (V is base64). The
@@ -20,11 +29,13 @@ type commandArg struct {
 
 // commandRequest is the POST body accepted by the generic command endpoint.
 // Args are typed command arguments (see commandArg); Binary selects
-// base64-encoded bulk string replies (bulk strings and array elements).
+// base64-encoded bulk string replies (bulk strings and array elements); DB is
+// the logical db the frontend currently has selected (see handleCommand).
 type commandRequest struct {
 	Cmd    string            `json:"cmd"`
 	Args   []json.RawMessage `json:"args"`
 	Binary bool              `json:"binary"`
+	DB     int               `json:"db"`
 }
 
 // typedReply is the tagged JSON envelope for a single Redis reply value:
@@ -58,7 +69,8 @@ type commandResponse struct {
 
 // handleCommand executes an arbitrary Redis command on the connection
 // identified by the {connID} path segment and serializes its reply with a
-// type tag. It returns 404 if the connection does not exist or is disabled.
+// type tag. It returns 404 if the connection does not exist or is disabled,
+// 413 when the request body exceeds maxCommandBodyBytes.
 func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	conn, ok := s.conns[r.PathValue("connID")]
 	if !ok || !conn.Enabled {
@@ -66,8 +78,14 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommandBodyBytes)
 	var req commandRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "redisui: request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "redisui: invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -83,7 +101,20 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		args = append(args, arg)
 	}
 
-	cmd := conn.Client.Do(r.Context(), args...)
+	// Resolve the executor: normally the injected client, but a dedicated
+	// db-pinned client when the frontend asks for a non-zero db (or issues
+	// SELECT itself). See commandExecutor for the invariants.
+	run, err := s.commandExecutor(conn, req)
+	if err != nil {
+		// Reported as a command-level error (200 + {error}), not an HTTP
+		// error: the frontend treats non-2xx responses as a broken
+		// connection and would tear it down.
+		msg := err.Error()
+		writeCommandResponse(w, &msg, nil)
+		return
+	}
+
+	cmd := run(r.Context(), args...)
 	if err := cmd.Err(); err != nil {
 		if err == redis.Nil {
 			// A nil reply (e.g. GET of a missing key) is not an error.
@@ -97,6 +128,111 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 	reply := serializeReply(cmd.Val(), req.Binary)
 	writeCommandResponse(w, nil, &reply)
+}
+
+// commandRunner executes one command and returns its reply.
+type commandRunner func(ctx context.Context, args ...interface{}) *redis.Cmd
+
+// commandExecutor decides which client a command request runs on.
+//
+//   - Plain command with db == 0: the injected client as-is. db 0 means "the
+//     db the host configured the client with" (0 in the common case), so the
+//     host's own pool, hooks, and failover handling all apply unchanged.
+//   - Non-zero db: a dedicated client (see dbClientFor) whose pool is pinned
+//     to that db when it dials. Routing through a separate client keeps the
+//     injected client's pool free of SELECT session state — a pooled SELECT
+//     would silently retarget every later command reusing that connection —
+//     and gives each db its own consistent pool.
+//   - A user-issued SELECT is routed to the target db's dedicated client too
+//     (its conns already open on that db), so even a raw CLI SELECT cannot
+//     pollute the injected pool. Cluster servers reject SELECT themselves,
+//     which the frontend relies on to snap the db selector back to 0.
+//   - Cluster clients have a single db (0) and no SELECT support, so a
+//     non-zero db is ignored there (it still addresses the only db).
+//   - Any other client type cannot scope a db to one connection; refuse the
+//     request instead of running it against the wrong db.
+func (s *server) commandExecutor(conn Connection, req commandRequest) (commandRunner, error) {
+	// cluster: single db; SELECT is rejected by the server itself.
+	if _, isCluster := conn.Client.(*redis.ClusterClient); isCluster {
+		return conn.Client.Do, nil
+	}
+
+	// db the request effectively addresses: an explicit SELECT overrides the
+	// body's db field with its target.
+	desiredDB := req.DB
+	selectTarget, hasSelectTarget := selectTargetDB(req.Args)
+	if strings.EqualFold(req.Cmd, "SELECT") && hasSelectTarget {
+		desiredDB = selectTarget
+	}
+
+	pc, isPlain := conn.Client.(*redis.Client)
+	if !isPlain {
+		if desiredDB > 0 {
+			return nil, fmt.Errorf("db %d requested but this client type cannot scope a db to one connection", desiredDB)
+		}
+		return conn.Client.Do, nil
+	}
+
+	if strings.EqualFold(req.Cmd, "SELECT") && hasSelectTarget {
+		return s.dbClientFor(conn, pc, desiredDB).Do, nil
+	}
+	if req.DB > 0 {
+		return s.dbClientFor(conn, pc, req.DB).Do, nil
+	}
+	return conn.Client.Do, nil
+}
+
+// selectTargetDB extracts the target db of a SELECT command from its
+// arguments (e.g. SELECT 3). It reports false when the argument is missing
+// or not a number, leaving the server to reject the malformed command.
+func selectTargetDB(args []json.RawMessage) (int, bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+	var raw string
+	if err := json.Unmarshal(args[0], &raw); err != nil {
+		var n int
+		if err := json.Unmarshal(args[0], &n); err != nil {
+			return 0, false
+		}
+		return n, true
+	}
+	db, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return db, true
+}
+
+// dbClientFor returns a cached client whose connection pool is pinned to the
+// given db. It is built from a copy of the injected client's options with
+// DB overridden (redis.NewClient clones what it is given, so the injected
+// client's live options are never mutated) — the pool is fully independent:
+// no shared options, no shared session state, no data race with the injected
+// client's own connection setup. Host-registered hooks (AddHook) do not carry
+// over to these clients; db 0 keeps using the injected client, so hooks apply
+// to the default path. The clients live as long as the server (connections
+// are host-owned and never unregistered), which matches the process lifetime
+// of the embedded UI.
+func (s *server) dbClientFor(conn Connection, pc *redis.Client, db int) *redis.Client {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+	if s.dbClients == nil {
+		s.dbClients = map[string]map[int]*redis.Client{}
+	}
+	byDB := s.dbClients[conn.ID]
+	if byDB == nil {
+		byDB = map[int]*redis.Client{}
+		s.dbClients[conn.ID] = byDB
+	}
+	if c := byDB[db]; c != nil {
+		return c
+	}
+	opts := *pc.Options() // shallow copy; NewClient deep-clones it
+	opts.DB = db
+	c := redis.NewClient(&opts)
+	byDB[db] = c
+	return c
 }
 
 // decodeCommandArg turns one raw JSON argument into a Go value safe to pass to

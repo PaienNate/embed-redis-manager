@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -38,17 +39,26 @@ type server struct {
 	frontend fs.FS                 // embedded dist, rooted at web/dist
 	middle   func(http.Handler) http.Handler
 	stream   map[string]http.Handler // connID -> per-connection SockJS handler
+
+	// dbClients caches the db-pinned clients behind dbClientFor:
+	// connID -> db -> dedicated client. Guarded by dbMu.
+	dbMu      sync.Mutex
+	dbClients map[string]map[int]*redis.Client
 }
 
 // Register mounts the Redis UI handlers under cfg.Prefix on mux. Prefix
-// defaults to "/redisui". If cfg.Middleware is non-nil it wraps every handler.
-// This task only mounts the placeholder GET {prefix}/api/connections endpoint.
+// defaults to "/redisui". It returns an error for an invalid prefix (one
+// resolving to the mux root) or for duplicate Connection IDs, in which case
+// nothing is mounted. If cfg.Middleware is non-nil it wraps every handler.
 func Register(mux *http.ServeMux, cfg Config) error {
 	if mux == nil {
 		return errors.New("redisui: Register: nil mux")
 	}
 
-	prefix := normalizePrefix(cfg.Prefix)
+	prefix, err := normalizePrefix(cfg.Prefix)
+	if err != nil {
+		return err
+	}
 	frontend, err := fs.Sub(distFS, "web/dist")
 	if err != nil {
 		return fmt.Errorf("redisui: embed frontend sub: %w", err)
@@ -61,6 +71,11 @@ func Register(mux *http.ServeMux, cfg Config) error {
 		stream:   map[string]http.Handler{},
 	}
 	for _, c := range cfg.Connections {
+		// A duplicate ID would silently overwrite the earlier connection in
+		// s.conns while appearing twice in the UI list; reject it instead.
+		if _, dup := s.conns[c.ID]; dup {
+			return fmt.Errorf("redisui: Register: duplicate connection ID %q", c.ID)
+		}
 		s.conns[c.ID] = c
 		s.order = append(s.order, c.ID)
 	}
@@ -141,15 +156,23 @@ func (s *server) serveIndexHTML(w http.ResponseWriter) {
 	_, _ = w.Write([]byte(html))
 }
 
-func normalizePrefix(prefix string) string {
+// normalizePrefix trims and normalizes cfg.Prefix into the mount prefix. An
+// empty prefix keeps the documented "/redisui" default. A prefix that resolves
+// to the mux root ("/", "///", ...) is rejected: the frontend catch-all
+// mounted there would swallow every host route on the mux.
+func normalizePrefix(prefix string) (string, error) {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
-		return "/redisui"
+		return "/redisui", nil
 	}
 	if !strings.HasPrefix(prefix, "/") {
 		prefix = "/" + prefix
 	}
-	return strings.TrimRight(prefix, "/")
+	prefix = strings.TrimRight(prefix, "/")
+	if prefix == "" {
+		return "", errors.New(`redisui: Register: prefix "/" would mount the UI at the mux root`)
+	}
+	return prefix, nil
 }
 
 type connectionDTO struct {

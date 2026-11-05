@@ -51,7 +51,8 @@ http.ListenAndServe(":8080", mux)
 
 `Connection` fields:
 
-- `ID` — unique identifier used in API paths.
+- `ID` — unique identifier used in API paths. Must be unique per `Register`
+  call; a duplicate makes `Register` return an error.
 - `Name` — display name shown in the UI.
 - `Client` — an injected `redis.UniversalClient`.
 - `Enabled` — when `false`, the connection is hidden from the UI list and its
@@ -61,10 +62,12 @@ http.ListenAndServe(":8080", mux)
 ### 3. Configure the prefix
 
 `Prefix` may include a leading slash or not (`/redisui` or `redisui`); it
-defaults to `/redisui`. The UI is served at that prefix and the API under
-`{prefix}/api`. Because the frontend is served from a relative base, it works
-under any prefix or reverse-proxy mount. Serve your own routes on the same mux
-without conflict.
+defaults to `/redisui`. A trailing slash is normalized away, but a prefix that
+resolves to the mux root (`"/"`) is rejected with an error from `Register` —
+the UI's SPA catch-all would otherwise swallow every host route. The UI is
+served at that prefix and the API under `{prefix}/api`. Because the frontend
+is served from a relative base, it works under any prefix or reverse-proxy
+mount. Serve your own routes on the same mux without conflict.
 
 ### 4. Add auth (pluggable middleware)
 
@@ -91,6 +94,36 @@ cfg := redisui.Config{
 
 A request missing the required header is rejected (`401`) before reaching any
 handler. Leave `Middleware` nil to disable wrapping.
+
+### 5. DB selection (multiple databases)
+
+The UI's db selector is implemented by attaching the selected db to **every**
+command request (`{"cmd":..., "db":N}`); the backend resolves each request to
+the right connection:
+
+- `db == 0` (the default) executes on the injected client exactly as-is — the
+  db the host configured it with (0 in the common case) — so host-registered
+  hooks and failover handling apply unchanged.
+- `db > 0` executes on a dedicated `redis.NewClient` built from a **copy** of
+  the injected `(*redis.Client).Options()` with `DB` overridden. Each db gets
+  its own connection pool that issues `SELECT` when it dials, so no `SELECT`
+  ever sticks to a pooled connection of the injected client and concurrent
+  requests can never land in the wrong db. These clients are created lazily
+  and cached for the lifetime of the server.
+- A raw `SELECT` typed in the CLI is routed to the target db's dedicated
+  client too, so it cannot pollute the injected pool. Cluster servers reject
+  `SELECT` themselves; the UI shows the error and snaps back to db 0.
+- Cluster connections ignore the `db` field — a cluster has exactly one db
+  (0), so any db value still addresses it.
+- Other client types (e.g. ring) cannot scope a db to one connection; a
+  `db > 0` request is refused with a command-level error instead of silently
+  running against the wrong db.
+
+Caveats: the per-db clients do not carry host-registered `AddHook` hooks (db 0
+does), and a per-db client derived from a sentinel-backed client pins the
+address it saw at first use. Hosts that prefer no db switching at all can
+register one `Connection` per database instead, each with its own client
+configured for that db; the UI then only operates db 0 per connection.
 
 ## Building the library
 
