@@ -4,6 +4,8 @@ go 1.26.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
+	github.com/gorilla/websocket v1.5.3
+	github.com/igm/sockjs-go v3.0.3+incompatible
 	github.com/redis/go-redis/v9 v9.23.0
 )
 

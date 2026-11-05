@@ -32,6 +32,7 @@
 import { allCMD } from '@/commands';
 import splitargs from '@qii404/redis-splitargs';
 import CliContent from '@/components/CliContent';
+import RedisStream, { parseMonitorLine } from '@/stream';
 
 export default {
   data() {
@@ -43,6 +44,7 @@ export default {
       multiQueue: null,
       subscribeMode: false,
       monitorMode: false,
+      stream: null,
       maxHistory: 2000,
     };
   },
@@ -94,8 +96,8 @@ export default {
 
       // copy to another client
       this.anoClient = this.client.duplicate();
-      // bind subscribe messages
-      this.bindSubscribeMessage();
+      // bind the SockJS streaming channel (monitor / pub-sub)
+      this.bindStream();
       this.scrollToBottom('> connecting......');
 
       this.anoClient.on('ready', () => {
@@ -159,31 +161,45 @@ export default {
 
       return items;
     },
-    bindSubscribeMessage() {
-      // bind subscribe message
-      this.anoClient.on('message', (channel, message) => {
-        this.scrollToBottom(`\n${channel}\n${message}`);
+    bindStream() {
+      const connID = this.anoClient && this.anoClient.connID != null
+        ? this.anoClient.connID
+        : (this.client && this.client.connID);
+      this.stream = new RedisStream(connID);
+      this.stream.on('message', (ev) => this.handleStreamEvent(ev));
+      this.stream.on('open', () => this.scrollToBottom('> stream connected.'));
+      this.stream.on('error', (err) => {
+        const msg = err && err.message ? err.message : String(err);
+        this.scrollToBottom(`(error) ${msg}`);
       });
-
-      // bind psubscribe message
-      this.anoClient.on('pmessage', (pattern, channel, message) => {
-        this.scrollToBottom(`\n${pattern}\n${channel}\n${message}`);
-      });
+      this.stream.connect();
+    },
+    handleStreamEvent(ev) {
+      if (!ev || !ev.type) {
+        return;
+      }
+      if (ev.type === 'message') {
+        this.scrollToBottom(`\n${ev.channel}\n${ev.message}`);
+      } else if (ev.type === 'pmessage') {
+        this.scrollToBottom(`\n${ev.pattern}\n${ev.channel}\n${ev.message}`);
+      } else if (ev.type === 'monitor') {
+        const parsed = parseMonitorLine(ev.line);
+        if (parsed.raw !== undefined) {
+          this.scrollToBottom(ev.line);
+        } else {
+          this.scrollToBottom(`${parsed.time} [${parsed.db} ${parsed.source}] ${parsed.args.join(' ')}`);
+        }
+      } else if (ev.type === 'error') {
+        this.scrollToBottom(`(error) ${ev.error}`);
+      }
     },
     stopSubscribe() {
       this.subscribeMode = false;
-      const subSet = this.anoClient.condition.subscriber.set;
-
-      if (!subSet) {
-        return;
-      }
-
-      Object.keys(subSet.subscribe).length && this.anoClient.unsubscribe();
-      Object.keys(subSet.psubscribe).length && this.anoClient.punsubscribe();
+      this.stream && this.stream.stop();
     },
     stopMonitor() {
       this.monitorMode = false;
-      this.monitorInstance && this.monitorInstance.disconnect();
+      this.stream && this.stream.stop();
     },
     consoleExec() {
       const params = this.paramsTrim;
@@ -250,22 +266,32 @@ export default {
         return this.scrollToBottom('QUEUED');
       }
 
-      // subscribe command
-      if (/subscribe/.test(paramsArr[0])) {
+      // subscribe command -> SockJS pub/sub channel
+      if (paramsArr[0] === 'subscribe') {
         this.subscribeMode = true;
+        const channels = paramsArr.slice(1);
+        if (channels.length) {
+          this.stream.subscribe(channels);
+          this.scrollToBottom('Subscribe');
+        }
+        return;
       }
 
-      // monitor command
-      if (paramsArr[0] == 'monitor') {
-        this.anoClient.monitor().then((monitor) => {
-          this.monitorMode = true;
-          this.scrollToBottom('OK');
-          this.monitorInstance = monitor;
-          this.monitorInstance.on('monitor', (time, args, source, database) => {
-            this.scrollToBottom(`${time} [${database} ${source}] ${args.join(' ')}`);
-          });
-        });
+      // psubscribe command -> SockJS pub/sub channel (pattern match)
+      if (paramsArr[0] === 'psubscribe') {
+        this.subscribeMode = true;
+        if (paramsArr.length > 1) {
+          this.stream.psubscribe(paramsArr.slice(1));
+          this.scrollToBottom('PSubscribe');
+        }
+        return;
+      }
 
+      // monitor command -> SockJS MONITOR stream
+      if (paramsArr[0] === 'monitor') {
+        this.monitorMode = true;
+        this.scrollToBottom('OK');
+        this.stream.monitor();
         return;
       }
 
@@ -426,6 +452,7 @@ export default {
     this.initHistoryTips();
   },
   beforeDestroy() {
+    this.stream && this.stream.close();
     this.anoClient && this.anoClient.quit && this.anoClient.quit();
     this.$shortcut.deleteScope(this.hotKeyScope);
     this.storeCommandTips();

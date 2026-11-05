@@ -36,6 +36,8 @@ type server struct {
 	order    []string              // connection IDs in config order
 	prefix   string                // normalized mount prefix
 	frontend fs.FS                 // embedded dist, rooted at web/dist
+	middle   func(http.Handler) http.Handler
+	stream   map[string]http.Handler // connID -> per-connection SockJS handler
 }
 
 // Register mounts the Redis UI handlers under cfg.Prefix on mux. Prefix
@@ -55,6 +57,8 @@ func Register(mux *http.ServeMux, cfg Config) error {
 		conns:    map[string]Connection{},
 		prefix:   prefix,
 		frontend: frontend,
+		middle:   cfg.Middleware,
+		stream:   map[string]http.Handler{},
 	}
 	for _, c := range cfg.Connections {
 		s.conns[c.ID] = c
@@ -72,6 +76,26 @@ func Register(mux *http.ServeMux, cfg Config) error {
 		cmdHandler = cfg.Middleware(cmdHandler)
 	}
 	mux.Handle("POST "+prefix+"/api/redis/{connID}/command", cmdHandler)
+
+	// Build one SockJS handler per enabled connection. A single generic
+	// dispatcher below validates the connID and routes to the right handler
+	// (404 for disabled/unknown connections), so those requests do not fall
+	// through to the SPA catch-all.
+	for _, c := range s.conns {
+		if !c.Enabled {
+			continue
+		}
+		s.registerStream(c)
+	}
+	var streamHandler http.Handler = http.HandlerFunc(s.handleStream)
+	if cfg.Middleware != nil {
+		streamHandler = cfg.Middleware(streamHandler)
+	}
+	// No method restriction: SockJS serves its transports over a mix of GET
+	// (websocket, eventsource, info, iframe) and POST (xhr, xhr_send,
+	// xhr_streaming), so the path must be routed for every method; the sockjs
+	// handler itself dispatches by method.
+	mux.Handle(prefix+"/api/redis/{connID}/stream/", streamHandler)
 
 	// Serve the embedded frontend under the prefix. This catch-all pattern is
 	// less specific than the API routes above, so API requests are unaffected.

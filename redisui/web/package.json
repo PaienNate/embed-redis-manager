@@ -26,6 +26,7 @@
     "pickleparser": "^0.2.1",
     "protobufjs": "^6.11.4",
     "rawproto": "^0.7.6",
+    "sockjs-client": "^1.6.1",
     "sortablejs": "^1.14.0",
     "vue": "2.7.16",
     "vue-i18n": "^8.28.2",
