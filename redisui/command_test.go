@@ -152,3 +152,121 @@ func TestCommandDisabledConnReturns404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+// parseScanReply decodes a SCAN command reply as {cursor, keys}. A SCAN reply
+// is `{t:"a", v:[<cursor>, <keys>]}`, the cursor being a tagged string and the
+// keys a tagged array of tagged strings.
+func parseScanReply(t *testing.T, rec *httptest.ResponseRecorder) (cursor string, keys []string) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Error *string         `json:"error"`
+		Reply json.RawMessage `json:"reply"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
+	}
+	if env.Error != nil {
+		t.Fatalf("expected error null, got %q", *env.Error)
+	}
+	var arr struct {
+		T string            `json:"t"`
+		V []json.RawMessage `json:"v"`
+	}
+	if err := json.Unmarshal(env.Reply, &arr); err != nil {
+		t.Fatalf("unmarshal reply: %v; raw=%s", err, env.Reply)
+	}
+	if arr.T != "a" || len(arr.V) != 2 {
+		t.Fatalf("unexpected scan reply shape: %s", env.Reply)
+	}
+	var cur struct {
+		T string `json:"t"`
+		V string `json:"v"`
+	}
+	if err := json.Unmarshal(arr.V[0], &cur); err != nil {
+		t.Fatalf("unmarshal cursor: %v; raw=%s", err, arr.V[0])
+	}
+	cursor = cur.V
+
+	var karr struct {
+		T string `json:"t"`
+		V []struct {
+			T string `json:"t"`
+			V string `json:"v"`
+		} `json:"v"`
+	}
+	if err := json.Unmarshal(arr.V[1], &karr); err != nil {
+		t.Fatalf("unmarshal keys: %v; raw=%s", err, arr.V[1])
+	}
+	for _, k := range karr.V {
+		keys = append(keys, k.V)
+	}
+	return cursor, keys
+}
+
+func TestCommandScanMatchAndCount(t *testing.T) {
+	// Verify SCAN through the generic endpoint returns only keys matching
+	// `MATCH` (multiple matches) and that the reply cursor is a string.
+	// NOTE: miniredis returns the whole matching set in a single page (cursor
+	// "0"), so genuine multi-page cursor iteration cannot be exercised here;
+	// the frontend HttpRedisClient scan loop (paging) is covered by
+	// web/test/httpClient.spec.js.
+	c := miniredisClient(t)
+	for _, k := range []string{"user:1", "user:2", "order:9", "user:3"} {
+		if err := c.Set(context.Background(), k, "v", 0).Err(); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+	rec := doCommand(t, mux, "c1", `{"cmd":"scan","args":["0","MATCH","user:*","COUNT","100"]}`)
+	cursor, keys := parseScanReply(t, rec)
+	if cursor != "0" {
+		t.Fatalf("cursor = %q, want \"0\"", cursor)
+	}
+	want := map[string]bool{"user:1": true, "user:2": true, "user:3": true}
+	if len(keys) != len(want) {
+		t.Fatalf("matched %v, want %d keys", keys, len(want))
+	}
+	for _, k := range keys {
+		if !want[k] {
+			t.Fatalf("unexpected matched key %q in %v", k, keys)
+		}
+	}
+}
+
+func TestCommandScanNoMatch(t *testing.T) {
+	c := miniredisClient(t)
+	if err := c.Set(context.Background(), "a", "v", 0).Err(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+	rec := doCommand(t, mux, "c1", `{"cmd":"scan","args":["0","MATCH","missing:*","COUNT","10"]}`)
+	cursor, keys := parseScanReply(t, rec)
+	if cursor != "0" {
+		t.Fatalf("cursor = %q, want \"0\"", cursor)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("keys = %v, want none", keys)
+	}
+}
+
+func TestCommandPing(t *testing.T) {
+	c := miniredisClient(t)
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+	rec := doCommand(t, mux, "c1", `{"cmd":"ping"}`)
+	assertReply(t, rec, `{"t":"s","v":"PONG"}`)
+}
+
+func TestCommandDBSize(t *testing.T) {
+	c := miniredisClient(t)
+	for _, k := range []string{"a", "b", "c"} {
+		if err := c.Set(context.Background(), k, "v", 0).Err(); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+	rec := doCommand(t, mux, "c1", `{"cmd":"dbsize"}`)
+	assertReply(t, rec, `{"t":"i","v":3}`)
+}

@@ -174,7 +174,14 @@ export default {
       this.selectedDbIndex = db;
     },
     initDatabaseSelect() {
-      this.client.config('get', 'databases').then((reply) => {
+      // Prefer the ioredis-style `config` method when present (cluster); the
+      // embedded HttpRedisClient exposes no `config` method, so fall back to
+      // the proxy's generic command endpoint via `call('CONFIG', ...)`.
+      const config = this.client.config
+        ? (...args) => this.client.config(...args)
+        : (...args) => this.client.call('CONFIG', ...args);
+
+      config('get', 'databases').then((reply) => {
         this.dbs = [...Array(parseInt(reply[1])).keys()];
         this.getDatabasesFromInfo();
       }).catch((e) => {

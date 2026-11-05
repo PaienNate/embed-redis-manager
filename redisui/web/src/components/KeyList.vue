@@ -42,6 +42,75 @@
 <script type="text/javascript">
 import KeyListVirtualTree from '@/components/KeyListVirtualTree';
 
+// Bridge the proxy's async-iterable SCAN stream into the EventEmitter-style
+// scanStream interface the original ARDM key list consumes.
+//
+// `HttpRedisClient.scanBufferStream()` returns an async iterable that yields
+// one key (a Buffer) at a time while streaming cursor pages, whereas the
+// original ioredis scanStream emitted page arrays through `on('data')` and
+// supported `pause()`/`resume()` (used for "load more"). This adapter turns the
+// async iterable back into that shape: each `data` event carries an array of
+// keys, and `pause()`/`resume()` gate the underlying `next()` calls so the
+// generator keeps its cursor between pages.
+function createScanStream(iterable) {
+  const listeners = { data: [], error: [], end: [] };
+  const iterator = iterable && iterable[Symbol.asyncIterator]
+    ? iterable[Symbol.asyncIterator]()
+    : iterable;
+
+  let paused = false;
+  let pumping = false;
+
+  const stream = {
+    on(event, fn) {
+      (listeners[event] = listeners[event] || []).push(fn);
+      return stream;
+    },
+    off(event, fn) {
+      const arr = listeners[event];
+      if (arr) {
+        const i = arr.indexOf(fn);
+        if (i >= 0) arr.splice(i, 1);
+      }
+      return stream;
+    },
+    pause() {
+      paused = true;
+    },
+    resume() {
+      paused = false;
+      pump();
+    },
+    emit(event, ...args) {
+      (listeners[event] || []).forEach((fn) => fn(...args));
+    },
+  };
+
+  const pump = async () => {
+    if (pumping) {
+      return;
+    }
+    pumping = true;
+    try {
+      while (!paused) {
+        const { value, done } = await iterator.next();
+        if (done) {
+          stream.emit('end');
+          break;
+        }
+        stream.emit('data', [value]);
+      }
+    } catch (e) {
+      stream.emit('error', e);
+    } finally {
+      pumping = false;
+    }
+  };
+
+  pump();
+  return stream;
+}
+
 export default {
   data() {
     return {
@@ -64,13 +133,14 @@ export default {
 
       // custom defined size
       if (keysPageSize) {
-        // cluster mode, pageSize = size / masterNodes
-        if (this.client.nodes) {
-          const nodeCount = this.client.nodes('master').length;
-          return nodeCount ? parseInt(keysPageSize / nodeCount) : keysPageSize;
+        // cluster mode, pageSize = size / masterNodes; the embedded build uses
+        // a single non-cluster HttpRedisClient, so nodes() is not an array.
+        const nodeCount = this.scanNodeCount();
+        if (nodeCount) {
+          return parseInt(keysPageSize / nodeCount);
         }
 
-        // common mode
+        // common / embedded mode
         return keysPageSize;
       }
 
@@ -145,7 +215,7 @@ export default {
       this.initScanStreamsAndScan(true);
     },
     initScanStreamsAndScan(loadAll = false) {
-      const nodes = this.client.nodes ? this.client.nodes('master') : [this.client];
+      const nodes = this.getScanNodes();
       const keysPageSize = loadAll ? 50000 : this.keysPageSize;
       this.scanningCount = nodes.length;
 
@@ -158,7 +228,7 @@ export default {
         // scan count is bigger when in search mode
         scanOption.match != '*' && (scanOption.count = this.searchPageSize);
 
-        const stream = node.scanBufferStream(scanOption);
+        const stream = createScanStream(node.scanBufferStream(scanOption));
         this.scanStreams.push(stream);
 
         stream.on('data', (keys) => {
@@ -210,6 +280,22 @@ export default {
           }
         });
       });
+    },
+    // Resolve the list of scan nodes. In the embedded build the client is a
+    // single non-cluster HttpRedisClient, so `nodes('master')` is not an array
+    // (it resolves to null) and we fall back to scanning `[this.client]`.
+    getScanNodes() {
+      if (this.client && this.client.nodes) {
+        const master = this.client.nodes('master');
+        if (Array.isArray(master) && master.length) {
+          return master;
+        }
+      }
+      return [this.client];
+    },
+    scanNodeCount() {
+      const master = this.getScanNodes();
+      return master.length > 1 ? master.length : 0;
     },
     resetKeyList() {
       // cancel scanning
