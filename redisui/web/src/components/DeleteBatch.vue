@@ -121,8 +121,22 @@ export default {
         }
       }
     },
-    confirmDelete() {
-      const keys = this.allKeysList;
+    // Detect a real cluster connection. HttpRedisClient.nodes() is async and
+    // resolves to [] for a standalone connection (non-empty node list only
+    // for a cluster), mirroring KeyList's getScanNodes fallback logic.
+    async isClusterClient() {
+      if (!this.client || typeof this.client.nodes !== 'function') {
+        return false;
+      }
+      try {
+        const nodes = await this.client.nodes('master');
+        return Array.isArray(nodes) && nodes.length > 0;
+      } catch (e) {
+        return false;
+      }
+    },
+    async confirmDelete() {
+      const keys = this.allKeysList.map((k) => k.key);
       const total = keys.length;
 
       if (total <= 0) {
@@ -130,53 +144,41 @@ export default {
       }
 
       this.loadingDelete = true;
-      let delPromise = null;
 
-      // standalone Redis, batch delete
-      if (!this.client.nodes) {
-        let chunked = [];
-        for (let i = 0; i < total; i++) {
-          chunked.push(keys[i].key);
-
-          // del 5000 keys one time
-          if (chunked.length >= 5000) {
-            delPromise = this.client.del(chunked);
-            chunked = [];
-          }
+      try {
+        const isCluster = await this.isClusterClient();
+        // standalone: batch up to 5000 keys per DEL; cluster: one key per
+        // DEL (a multi-key DEL across slots fails with CROSSSLOT).
+        const chunkSize = isCluster ? 1 : 5000;
+        const chunks = [];
+        for (let i = 0; i < total; i += chunkSize) {
+          chunks.push(keys.slice(i, i + chunkSize));
         }
 
-        if (chunked.length) {
-          delPromise = this.client.del(chunked);
-        }
-        // use final promise
-        delPromise.then((reply) => {
-          if (reply > 0) {
-            this.afterDelete();
-          } else {
-            this.deleteFailed(this.$t('message.delete_failed'));
+        // Wait for each wave of chunks instead of firing every request at
+        // once: at most 8 DEL requests are in flight, so a huge key list
+        // cannot turn into an unbounded burst of HTTP requests.
+        const MAX_CONCURRENT = 8;
+        let next = 0;
+        let deleted = 0;
+        const worker = async () => {
+          while (next < chunks.length) {
+            const chunk = chunks[next++];
+            const reply = await this.client.del(chunk);
+            deleted += Number(reply) || 0;
           }
-        }).catch((e) => {
-          this.deleteFailed(e.message);
-        });
-      }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(MAX_CONCURRENT, chunks.length) }, () => worker()),
+        );
 
-      // cluster, one key per time instead of batch
-      else {
-        for (let i = 0; i < total; i++) {
-          delPromise = this.client.del(keys[i].key);
-          delPromise.catch((e) => {});
+        if (deleted > 0) {
+          this.afterDelete();
+        } else {
+          this.deleteFailed(this.$t('message.delete_failed'));
         }
-
-        // use final promise
-        delPromise.then((reply) => {
-          if (reply == 1) {
-            this.afterDelete();
-          } else {
-            this.deleteFailed(this.$t('message.delete_failed'));
-          }
-        }).catch((e) => {
-          this.deleteFailed(e.message);
-        });
+      } catch (e) {
+        this.deleteFailed(e.message);
       }
     },
     afterDelete() {

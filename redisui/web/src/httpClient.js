@@ -1,7 +1,7 @@
 // HttpRedisClient: an ioredis-compatible proxy that drives redis through the
 // Go backend's generic command endpoint instead of a direct socket.
 //
-//     POST {apiBase}/redis/{connID}/command   body { cmd, args, binary }
+//     POST {apiBase}/redis/{connID}/command   body { cmd, args, binary, db }
 //
 // The response is `{ error: string|null, reply: <tagged> }`. Tagged replies:
 //   { t:'s', v }   string
@@ -84,23 +84,47 @@ export default class HttpRedisClient {
       return { t: 's', v: String(a) };
     });
 
-    const resp = await fetch(this.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd, args: encodedArgs, binary }),
-    });
+    // Every command carries the currently selected db so the backend can
+    // scope the request to it (see the `db` field in command.go). db 0 means
+    // "the db the injected client is configured with".
+    const db = (this.condition && this.condition.select) || 0;
+
+    let resp;
+    try {
+      resp = await fetch(this.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd, args: encodedArgs, binary, db }),
+      });
+    } catch (e) {
+      // Network failure: the connection to the backend is gone.
+      this.emit('error', e);
+      throw e;
+    }
 
     if (!resp.ok) {
+      // HTTP-layer failure (bad gateway status, 413, ...): connection-level.
       const e = new Error(`Redis HTTP ${resp.status} ${resp.statusText}`);
       this.emit('error', e);
       throw e;
     }
 
-    const data = await resp.json();
-    if (data.error) {
-      const e = new Error(data.error);
+    let data;
+    try {
+      data = await resp.json();
+    } catch (e) {
+      // Not JSON: transport/protocol problem, not a Redis reply.
       this.emit('error', e);
       throw e;
+    }
+
+    if (data.error) {
+      // Redis command error (WRONGTYPE, NOPERM, ...): the connection itself
+      // is fine, so only reject the promise. Emitting 'error' here would make
+      // ConnectionWrapper toast and close a perfectly healthy connection —
+      // e.g. CONFIG GET/INFO refused by a hardened Redis would kill the
+      // connection the moment it opens.
+      throw new Error(data.error);
     }
 
     return decodeReply(data.reply, binary);
@@ -214,17 +238,29 @@ export default class HttpRedisClient {
     // `{ error, nodes }` where nodes is an empty array for a non-cluster
     // connection and a list of cluster node descriptors otherwise.
     const url = `${this.apiBase}/redis/${this.connID}/cluster/nodes`;
-    const resp = await fetch(url);
+    let resp;
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      this.emit('error', e);
+      throw e;
+    }
     if (!resp.ok) {
       const e = new Error(`Redis HTTP ${resp.status} ${resp.statusText}`);
       this.emit('error', e);
       throw e;
     }
-    const data = await resp.json();
-    if (data.error) {
-      const e = new Error(data.error);
+    let data;
+    try {
+      data = await resp.json();
+    } catch (e) {
       this.emit('error', e);
       throw e;
+    }
+    if (data.error) {
+      // Command-level failure (e.g. CLUSTER NODES rejected): reject only —
+      // like in _send, it does not mean the connection is broken.
+      throw new Error(data.error);
     }
     return data.nodes || [];
   }

@@ -29,6 +29,7 @@ describe('HttpRedisClient', () => {
       cmd: 'SET',
       args: [{ t: 's', v: 'k' }, { t: 's', v: 'v' }],
       binary: false,
+      db: 0,
     });
   });
 
@@ -81,6 +82,63 @@ describe('HttpRedisClient', () => {
     await expect(client.call('GET', 'k')).rejects.toThrow('ERR unknown command');
   });
 
+  // C1: a Redis command error is NOT a connection error. ConnectionWrapper
+  // tears the connection down on every 'error' event, so emitting here would
+  // close the connection as soon as a refused CONFIG GET/INFO runs at open.
+  it('command errors reject without emitting the error event', async () => {
+    fetch.mockImplementation(async () => jsonResponse(
+      { error: "NOPERM this user has no permissions to run the 'config' command", reply: null },
+    ));
+
+    const client = new HttpRedisClient('conn1');
+    const emitted = [];
+    client.on('error', (e) => emitted.push(e));
+
+    await expect(client.call('CONFIG', 'GET', 'databases')).rejects.toThrow('NOPERM');
+    await expect(client.call('INFO')).rejects.toThrow('NOPERM');
+    expect(emitted).toHaveLength(0);
+  });
+
+  it('network failures still emit the error event', async () => {
+    fetch.mockRejectedValue(new Error('fetch failed'));
+
+    const client = new HttpRedisClient('conn1');
+    const emitted = [];
+    client.on('error', (e) => emitted.push(e));
+
+    await expect(client.call('PING')).rejects.toThrow('fetch failed');
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].message).toBe('fetch failed');
+  });
+
+  it('non-2xx HTTP responses still emit the error event', async () => {
+    fetch.mockResolvedValue(new Response('bad gateway', { status: 502, statusText: 'Bad Gateway' }));
+
+    const client = new HttpRedisClient('conn1');
+    const emitted = [];
+    client.on('error', (e) => emitted.push(e));
+
+    await expect(client.call('PING')).rejects.toThrow('Redis HTTP 502');
+    expect(emitted).toHaveLength(1);
+  });
+
+  // I1 (option A): every command carries the selected db so the backend can
+  // scope it to a dedicated db-pinned client.
+  it('sends the currently selected db with every command', async () => {
+    fetch.mockImplementation(async () => jsonResponse({ error: null, reply: { t: 's', v: 'OK' } }));
+
+    const client = new HttpRedisClient('conn1', { db: 3 });
+    await client.call('GET', 'k');
+    expect(JSON.parse(fetch.mock.calls[0][1].body).db).toBe(3);
+
+    await client.select(5);
+    expect(JSON.parse(fetch.mock.calls[1][1].body).db).toBe(3); // SELECT itself still carries the old db
+    expect(JSON.parse(fetch.mock.calls[1][1].body).cmd).toBe('SELECT');
+
+    await client.call('GET', 'k');
+    expect(JSON.parse(fetch.mock.calls[2][1].body).db).toBe(5);
+  });
+
   it('uses /api as the default apiBase when window.__REDISUI__ is missing', async () => {
     delete globalThis.window;
     fetch.mockResolvedValue(jsonResponse({ error: null, reply: { t: 's', v: 'ok' } }));
@@ -128,6 +186,7 @@ describe('HttpRedisClient scanBufferStream', () => {
       cmd: 'SCAN',
       args: [{ t: 's', v: '0' }, { t: 's', v: 'MATCH' }, { t: 's', v: '*' }, { t: 's', v: 'COUNT' }, { t: 's', v: '2' }],
       binary: true,
+      db: 0,
     });
   });
 });
@@ -156,6 +215,7 @@ describe('HttpRedisClient stream / array-arg / nodes', () => {
         { t: 's', v: 'v2' },
       ],
       binary: false,
+      db: 0,
     });
   });
 
@@ -180,6 +240,7 @@ describe('HttpRedisClient stream / array-arg / nodes', () => {
         { t: 's', v: '10' },
       ],
       binary: true,
+      db: 0,
     });
     expect(reply[0][1][0].equals(Buffer.from('1-0'))).toBe(true);
   });
@@ -212,6 +273,7 @@ describe('HttpRedisClient stream / array-arg / nodes', () => {
         { t: 's', v: '{"a":1}' },
       ],
       binary: false,
+      db: 0,
     });
   });
 
@@ -238,5 +300,16 @@ describe('HttpRedisClient stream / array-arg / nodes', () => {
     const client = new HttpRedisClient('conn1');
     const nodes = await client.nodes();
     expect(nodes).toEqual([]);
+  });
+
+  it('nodes() rejects a command error without emitting the error event', async () => {
+    fetch.mockResolvedValue(jsonResponse({ error: 'ERR cluster support disabled', nodes: null }));
+
+    const client = new HttpRedisClient('conn1');
+    const emitted = [];
+    client.on('error', (e) => emitted.push(e));
+
+    await expect(client.nodes()).rejects.toThrow('cluster support disabled');
+    expect(emitted).toHaveLength(0);
   });
 });

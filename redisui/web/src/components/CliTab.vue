@@ -201,6 +201,14 @@ export default {
       this.monitorMode = false;
       this.stream && this.stream.stop();
     },
+    // MULTI/EXEC needs a client that can queue commands and run them on one
+    // connection (ioredis multi().execBuffer()); the embedded HTTP proxy
+    // offers no such API, so report it as unsupported instead of crashing.
+    supportsMultiExec() {
+      return !!(this.anoClient
+        && typeof this.anoClient.multi === 'function'
+        && typeof this.anoClient.execBuffer === 'function');
+    },
     consoleExec() {
       const params = this.paramsTrim;
       const { paramsArr } = this;
@@ -226,6 +234,9 @@ export default {
 
       // multi-exec mode
       if (paramsArr[0] == 'multi') {
+        if (!this.supportsMultiExec()) {
+          return this.scrollToBottom('(error) MULTI/EXEC is not supported by this client');
+        }
         this.multiQueue = [];
         return this.scrollToBottom('OK');
       }
@@ -245,6 +256,14 @@ export default {
         // exec when not multi condition
         if (!Array.isArray(this.multiQueue)) {
           return this.scrollToBottom('(error) ERR EXEC without MULTI');
+        }
+
+        // The embedded HttpRedisClient has no multi/execBuffer (a real
+        // MULTI/EXEC needs one dedicated connection, which the HTTP proxy
+        // cannot pin); guard instead of throwing a TypeError.
+        if (!this.supportsMultiExec()) {
+          this.multiQueue = null;
+          return this.scrollToBottom('(error) MULTI/EXEC is not supported by this client');
         }
 
         this.anoClient.multi(this.multiQueue).execBuffer((err, reply) => {
