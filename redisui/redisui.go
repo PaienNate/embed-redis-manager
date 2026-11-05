@@ -65,23 +65,12 @@ func Register(mux *http.ServeMux, cfg Config) error {
 		s.order = append(s.order, c.ID)
 	}
 
-	var handler http.Handler = http.HandlerFunc(s.handleConnections)
-	if cfg.Middleware != nil {
-		handler = cfg.Middleware(handler)
-	}
-	mux.Handle("GET "+prefix+"/api/connections", handler)
-
-	var cmdHandler http.Handler = http.HandlerFunc(s.handleCommand)
-	if cfg.Middleware != nil {
-		cmdHandler = cfg.Middleware(cmdHandler)
-	}
-	mux.Handle("POST "+prefix+"/api/redis/{connID}/command", cmdHandler)
-
-	var nodesHandler http.Handler = http.HandlerFunc(s.handleClusterNodes)
-	if cfg.Middleware != nil {
-		nodesHandler = cfg.Middleware(nodesHandler)
-	}
-	mux.Handle("GET "+prefix+"/api/redis/{connID}/cluster/nodes", nodesHandler)
+	// Every route mounted under the prefix is passed through wrap() so
+	// Config.Middleware (auth, logging, CORS, ...) applies uniformly. Any new
+	// prefix route added later must also be wrapped via s.wrap.
+	mux.Handle("GET "+prefix+"/api/connections", s.wrap(http.HandlerFunc(s.handleConnections)))
+	mux.Handle("POST "+prefix+"/api/redis/{connID}/command", s.wrap(http.HandlerFunc(s.handleCommand)))
+	mux.Handle("GET "+prefix+"/api/redis/{connID}/cluster/nodes", s.wrap(http.HandlerFunc(s.handleClusterNodes)))
 
 	// Build one SockJS handler per enabled connection. A single generic
 	// dispatcher below validates the connID and routes to the right handler
@@ -93,24 +82,26 @@ func Register(mux *http.ServeMux, cfg Config) error {
 		}
 		s.registerStream(c)
 	}
-	var streamHandler http.Handler = http.HandlerFunc(s.handleStream)
-	if cfg.Middleware != nil {
-		streamHandler = cfg.Middleware(streamHandler)
-	}
 	// No method restriction: SockJS serves its transports over a mix of GET
 	// (websocket, eventsource, info, iframe) and POST (xhr, xhr_send,
 	// xhr_streaming), so the path must be routed for every method; the sockjs
 	// handler itself dispatches by method.
-	mux.Handle(prefix+"/api/redis/{connID}/stream/", streamHandler)
+	mux.Handle(prefix+"/api/redis/{connID}/stream/", s.wrap(http.HandlerFunc(s.handleStream)))
 
 	// Serve the embedded frontend under the prefix. This catch-all pattern is
 	// less specific than the API routes above, so API requests are unaffected.
-	var frontendHandler http.Handler = http.HandlerFunc(s.serveFrontend)
-	if cfg.Middleware != nil {
-		frontendHandler = cfg.Middleware(frontendHandler)
-	}
-	mux.Handle(prefix+"/", frontendHandler)
+	mux.Handle(prefix+"/", s.wrap(http.HandlerFunc(s.serveFrontend)))
 	return nil
+}
+
+// wrap applies Config.Middleware (if any) to h. Every route mounted by
+// Register goes through wrap so middleware coverage is uniform across the API
+// and the embedded frontend.
+func (s *server) wrap(h http.Handler) http.Handler {
+	if s.middle != nil {
+		return s.middle(h)
+	}
+	return h
 }
 
 // serveFrontend serves the embedded static frontend under the configured
