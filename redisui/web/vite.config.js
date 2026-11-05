@@ -4,6 +4,9 @@ import { fileURLToPath, URL } from 'node:url';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // relative base so the built SPA can be served under any host prefix
+  // (e.g. /redisui/) via the Go backend; asset refs become ./assets/...
+  base: './',
   plugins: [vue()],
   resolve: {
     extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json', '.vue', '.scss'],
