@@ -183,25 +183,59 @@ func (s *server) commandExecutor(conn Connection, req commandRequest) (commandRu
 }
 
 // selectTargetDB extracts the target db of a SELECT command from its
-// arguments (e.g. SELECT 3). It reports false when the argument is missing
-// or not a number, leaving the server to reject the malformed command.
+// arguments (e.g. SELECT 3). The frontend always encodes arguments as typed
+// objects ({"t":"s","v":"1"}; binary args arrive base64-encoded), while older
+// callers sent bare JSON strings/integers — both shapes are recognized. It
+// reports false when the argument is missing or not a number, leaving the
+// server to reject the malformed command.
 func selectTargetDB(args []json.RawMessage) (int, bool) {
 	if len(args) == 0 {
 		return 0, false
 	}
-	var raw string
-	if err := json.Unmarshal(args[0], &raw); err != nil {
-		var n int
-		if err := json.Unmarshal(args[0], &n); err != nil {
+
+	// Typed argument in the shape the frontend actually sends.
+	var typed struct {
+		T string          `json:"t"`
+		V json.RawMessage `json:"v"`
+	}
+	if err := json.Unmarshal(args[0], &typed); err == nil && typed.T != "" {
+		switch typed.T {
+		case "s", "b":
+			var s string
+			if err := json.Unmarshal(typed.V, &s); err != nil {
+				return 0, false
+			}
+			if typed.T == "b" {
+				raw, err := base64.StdEncoding.DecodeString(s)
+				if err != nil {
+					return 0, false
+				}
+				s = string(raw)
+			}
+			db, err := strconv.Atoi(s)
+			return db, err == nil
+		case "i":
+			var n int
+			if err := json.Unmarshal(typed.V, &n); err != nil {
+				return 0, false
+			}
+			return n, true
+		default:
 			return 0, false
 		}
+	}
+
+	// Legacy bare shapes: JSON string ("1") or integer (1).
+	var s string
+	if err := json.Unmarshal(args[0], &s); err == nil {
+		db, err := strconv.Atoi(s)
+		return db, err == nil
+	}
+	var n int
+	if err := json.Unmarshal(args[0], &n); err == nil {
 		return n, true
 	}
-	db, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, false
-	}
-	return db, true
+	return 0, false
 }
 
 // dbClientFor returns a cached client whose connection pool is pinned to the
@@ -230,6 +264,12 @@ func (s *server) dbClientFor(conn Connection, pc *redis.Client, db int) *redis.C
 	}
 	opts := *pc.Options() // shallow copy; NewClient deep-clones it
 	opts.DB = db
+	// The shallow copy still points at the host's *live* MaintNotificationsConfig;
+	// NewClient's clone() dereferences that pointer, racing with the host's
+	// initConn writing Mode under its own optLock (go-redis v9.23 gives a
+	// derived Conn its own lock over the shared Options). Drop the pointer —
+	// Options.init() re-applies the defaults to the fresh copy (nil-safe).
+	opts.MaintNotificationsConfig = nil
 	c := redis.NewClient(&opts)
 	byDB[db] = c
 	return c
