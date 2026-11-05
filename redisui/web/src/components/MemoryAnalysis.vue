@@ -77,6 +77,7 @@
 
 <script type="text/javascript">
 import { RecycleScroller } from 'vue-virtual-scroller';
+import createScanStream from '@/scanStream';
 
 export default {
   data() {
@@ -108,57 +109,55 @@ export default {
       this.initScanStreamsAndScan(this.pattern ? this.pattern : '');
     },
     initScanStreamsAndScan(pattern = '') {
-      const nodes = this.client.nodes ? this.client.nodes('master') : [this.client];
-      this.scanningCount = nodes.length;
+      // The embedded client is a single proxy connection; the proxy's
+      // scanBufferStream returns an async iterable, which createScanStream
+      // re-shapes into the pause/resume + on('data') interface this component
+      // uses (see KeyContentHash/Zset for the same pattern).
+      const scanOption = {
+        match: `${pattern}*`,
+        count: this.scanPageSize,
+      };
 
-      nodes.map((node) => {
-        const scanOption = {
-          match: `${pattern}*`,
-          count: this.scanPageSize,
-        };
+      const stream = createScanStream(this.client.scanBufferStream(scanOption), this.scanPageSize);
+      this.scanStreams.push(stream);
+      this.scanningCount = 1;
 
-        const stream = node.scanBufferStream(scanOption);
-        this.scanStreams.push(stream);
+      stream.on('data', (keys) => {
+        // waiting for memory analysis
+        stream.pause();
 
-        stream.on('data', (keys) => {
-          // waiting for memory analysis
-          stream.pause();
+        // limit scanning max count
+        if (this.keysList.length > this.scanMax) {
+          this.$message.warning(`${this.$t('message.max_scan', { num: this.scanMax })}, stopped.`);
+          this.scanningEnd = true;
+          return this.toggleScanning(true);
+        }
 
-          // limit scanning max count
-          if (this.keysList.length > this.scanMax) {
-            this.$message.warning(`${this.$t('message.max_scan', { num: this.scanMax })}, stopped.`);
-            this.scanningEnd = true;
-            return this.toggleScanning(true);
-          }
+        const keysWithMemory = [];
+        const promise = this.initKeysMemory(keys, keysWithMemory);
 
-          const keysWithMemory = [];
-          const promise = this.initKeysMemory(keys, keysWithMemory);
+        promise.then(() => {
+          // add interval between rendering
+          setTimeout(() => {
+            this.keysList = this.keysList.concat(keysWithMemory);
+            this.reOrder('desc');
+            this.isScanning && stream.resume();
+          }, 100);
 
-          promise.then(() => {
-            // add interval between rendering
-            setTimeout(() => {
-              this.keysList = this.keysList.concat(keysWithMemory);
-              this.reOrder('desc');
-              this.isScanning && stream.resume();
-            }, 100);
-
-            // size count
-            this.totalSize += keysWithMemory.reduce((sum, item) => sum + parseInt(item.size), 0);
-          });
+          // size count
+          this.totalSize += keysWithMemory.reduce((sum, item) => sum + parseInt(item.size), 0);
         });
+      });
 
-        stream.on('error', (e) => {
-          this.toggleScanning(true);
-          this.$message.error(`Memory Analysis Stream On Error: ${e.messag}`);
-        });
+      stream.on('error', (e) => {
+        this.toggleScanning(true);
+        this.$message.error(`Memory Analysis Stream On Error: ${e.message}`);
+      });
 
-        stream.on('end', () => {
-          // all nodes scan finished(cusor back to 0)
-          if (--this.scanningCount <= 0) {
-            this.isScanning = false;
-            this.scanningEnd = true;
-          }
-        });
+      stream.on('end', () => {
+        // scanning finished (cursor back to 0)
+        this.isScanning = false;
+        this.scanningEnd = true;
       });
     },
     // todo: should avoid logging too many commands!

@@ -131,3 +131,112 @@ describe('HttpRedisClient scanBufferStream', () => {
     });
   });
 });
+
+describe('HttpRedisClient stream / array-arg / nodes', () => {
+  beforeEach(() => {
+    globalThis.window = { __REDISUI__: { apiBase: '/api' } };
+    globalThis.fetch = vi.fn();
+  });
+
+  it('xadd flattens a field/value array into the command args', async () => {
+    fetch.mockResolvedValue(jsonResponse({ error: null, reply: { t: 's', v: '1-0' } }));
+
+    const client = new HttpRedisClient('conn1');
+    await client.xadd('mystream', '*', ['f1', 'v1', 'f2', 'v2']);
+
+    const [, init] = fetch.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      cmd: 'XADD',
+      args: [
+        { t: 's', v: 'mystream' },
+        { t: 's', v: '*' },
+        { t: 's', v: 'f1' },
+        { t: 's', v: 'v1' },
+        { t: 's', v: 'f2' },
+        { t: 's', v: 'v2' },
+      ],
+      binary: false,
+    });
+  });
+
+  it('xrevrangeBuffer issues XREVRANGE in binary mode and decodes Buffers', async () => {
+    const id = Buffer.from('1-0').toString('base64');
+    fetch.mockResolvedValue(jsonResponse({
+      error: null,
+      reply: { t: 'a', v: [{ t: 'a', v: [{ t: 's', v: '1-0' }, { t: 'a', v: [{ t: 'b', v: id }] }] }] },
+    }));
+
+    const client = new HttpRedisClient('conn1');
+    const reply = await client.xrevrangeBuffer(['mystream', '+', '-', 'COUNT', '10']);
+
+    const [, init] = fetch.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      cmd: 'XREVRANGE',
+      args: [
+        { t: 's', v: 'mystream' },
+        { t: 's', v: '+' },
+        { t: 's', v: '-' },
+        { t: 's', v: 'COUNT' },
+        { t: 's', v: '10' },
+      ],
+      binary: true,
+    });
+    expect(reply[0][1][0].equals(Buffer.from('1-0'))).toBe(true);
+  });
+
+  it('xdel / xlen go through the generic command endpoint', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ error: null, reply: { t: 'i', v: 1 } }))
+      .mockResolvedValueOnce(jsonResponse({ error: null, reply: { t: 'i', v: 1 } }));
+    const client = new HttpRedisClient('conn1');
+
+    await client.xdel('mystream', '1-0');
+    expect(JSON.parse(fetch.mock.calls[0][1].body).cmd).toBe('XDEL');
+
+    await client.xlen('mystream');
+    expect(JSON.parse(fetch.mock.calls[1][1].body).cmd).toBe('XLEN');
+  });
+
+  it('call flattens a single array of arguments (JSON.SET style)', async () => {
+    fetch.mockResolvedValue(jsonResponse({ error: null, reply: { t: 's', v: 'OK' } }));
+
+    const client = new HttpRedisClient('conn1');
+    await client.call('JSON.SET', ['doc', '$', '{"a":1}']);
+
+    const [, init] = fetch.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      cmd: 'JSON.SET',
+      args: [
+        { t: 's', v: 'doc' },
+        { t: 's', v: '$' },
+        { t: 's', v: '{"a":1}' },
+      ],
+      binary: false,
+    });
+  });
+
+  it('nodes() fetches the cluster nodes endpoint and returns the node list', async () => {
+    fetch.mockResolvedValue(jsonResponse({
+      error: null,
+      nodes: [
+        { id: 'a', addr: '10.0.0.1:6379', role: 'master', slots: ['0-5460'] },
+      ],
+    }));
+
+    const client = new HttpRedisClient('conn1');
+    const nodes = await client.nodes();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe('/api/redis/conn1/cluster/nodes');
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].role).toBe('master');
+  });
+
+  it('nodes() returns an empty array for a non-cluster (empty nodes) reply', async () => {
+    fetch.mockResolvedValue(jsonResponse({ error: null, nodes: [] }));
+
+    const client = new HttpRedisClient('conn1');
+    const nodes = await client.nodes();
+    expect(nodes).toEqual([]);
+  });
+});

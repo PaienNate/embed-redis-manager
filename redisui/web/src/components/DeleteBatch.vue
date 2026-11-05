@@ -41,6 +41,7 @@
 
 <script type="text/javascript">
 import { RecycleScroller } from 'vue-virtual-scroller';
+import createScanStream from '@/scanStream';
 
 export default {
   data() {
@@ -68,43 +69,39 @@ export default {
       }
     },
     initScanStreamsAndScan(pattern) {
-      const nodes = this.client.nodes ? this.client.nodes('master') : [this.client];
-      this.scanningCount = nodes.length;
+      // The embedded client is a single proxy connection; its scanBufferStream
+      // is an async iterable that createScanStream re-shapes into the
+      // pause/resume + on('data') interface used here.
+      const scanOption = {
+        match: `${pattern}*`,
+        count: 20000,
+      };
 
-      nodes.map((node) => {
-        const scanOption = {
-          match: `${pattern}*`,
-          count: 20000,
-        };
+      const stream = createScanStream(this.client.scanBufferStream(scanOption), 20000);
+      this.scanStreams.push(stream);
+      this.scanningCount = 1;
 
-        const stream = node.scanBufferStream(scanOption);
-        this.scanStreams.push(stream);
+      stream.on('data', (keys) => {
+        this.addToList(keys.sort());
 
-        stream.on('data', (keys) => {
-          this.addToList(keys.sort());
+        // pause for dom rendering
+        stream.pause();
+        setTimeout(() => {
+          this.loadingScan && stream.resume();
+        }, 100);
+      });
 
-          // pause for dom rendering
-          stream.pause();
-          setTimeout(() => {
-            this.loadingScan && stream.resume();
-          }, 100);
+      stream.on('error', (e) => {
+        this.loadingScan = false;
+        this.$message.error({
+          message: `Delete Batch Stream On Error: ${e.message}`,
+          duration: 1500,
         });
+      });
 
-        stream.on('error', (e) => {
-          this.loadingScan = false;
-          this.$message.error({
-            message: `Delete Batch Stream On Error: ${e.message}`,
-            duration: 1500,
-          });
-        });
-
-        stream.on('end', () => {
-          // all nodes scan finished(cusor back to 0)
-          if (--this.scanningCount <= 0) {
-            this.loadingScan = false;
-            this.scanningEnd = true;
-          }
-        });
+      stream.on('end', () => {
+        this.loadingScan = false;
+        this.scanningEnd = true;
       });
     },
     addToList(keys) {

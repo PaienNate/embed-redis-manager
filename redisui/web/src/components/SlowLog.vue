@@ -82,30 +82,29 @@ export default {
       this.initConfig();
     },
     initCmdList() {
-      const nodes = this.client.nodes ? this.client.nodes('master') : [this.client];
-
-      nodes.map((node) => {
+      // The embedded client is a single proxy connection; a cluster's per-node
+      // SLOWLOG is not reachable through it, so we query the node the proxy
+      // routes to.
+      this.client.callBuffer('SLOWLOG', 'GET', this.scanMax).then((reply) => {
         const lines = [];
-        node.callBuffer('SLOWLOG', 'GET', this.scanMax).then((reply) => {
-          for (const item of reply) {
-            const line = {
-              id: item[0],
-              timestring: this.toLocalTime(item[1] * 1000),
-              cost: (item[2] / 1000).toFixed(3),
-              cmd: item[3].join(' '),
-              source: item[4],
-              name: item[5],
-            };
+        for (const item of reply) {
+          const line = {
+            id: item[0],
+            timestring: this.toLocalTime(item[1] * 1000),
+            cost: (item[2] / 1000).toFixed(3),
+            cmd: item[3].join(' '),
+            source: item[4],
+            name: item[5],
+          };
 
-            lines.push(line);
-          }
+          lines.push(line);
+        }
 
-          this.cmdList = lines;
-          this.isScanning = false;
-        }).catch((e) => {
-          this.isScanning = false;
-          this.$message.error(e.message);
-        });
+        this.cmdList = lines;
+        this.isScanning = false;
+      }).catch((e) => {
+        this.isScanning = false;
+        this.$message.error(e.message);
       });
     },
     initConfig() {

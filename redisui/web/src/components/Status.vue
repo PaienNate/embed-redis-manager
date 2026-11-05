@@ -335,44 +335,31 @@ export default {
       return dbs;
     },
     initClusterKeys() {
-      // const nodes = this.client.nodes('master');
-      const nodes = this.client.nodes ? this.client.nodes('master') : [this.client];
-
-      if (!nodes || !nodes.length) {
-        return;
-      }
-
-      // get real node name in ssh+cluster, instead of local port
-      const natMap = this.client.options.natMap;
-      const clusterNodeNames = {};
-
-      if (natMap && Object.keys(natMap).length) {
-        for (const real in natMap) {
-          clusterNodeNames[`${natMap[real].host}:${natMap[real].port}`] = real;
+      // The embedded HttpRedisClient proxies a single backend connection, so
+      // we cannot open a per-node sub-client to run `INFO KEYSPACE` on each
+      // cluster node. Instead we fetch the cluster node topology from the
+      // proxy and surface each node's id/addr/role/flags/slots/link-state in
+      // the key-statistics table (node column + the other columns).
+      this.client.nodes().then((nodes) => {
+        if (!nodes || !nodes.length) {
+          return;
         }
-      }
 
-      nodes.map((node) => {
-        node.call('INFO', 'KEYSPACE').then((reply) => {
-          const { options } = node;
+        const rows = nodes.map((node) => ({
+          name: node.addr,
+          db: node.role,
+          keys: 0,
+          expires: 0,
+          avg_ttl: 0,
+          keys_show: (node.slots && node.slots.length) ? node.slots.slice(0, 3).join(' ') : '-',
+          expires_show: node.flags || '-',
+          avg_ttl_show: node.linkState || '-',
+        }));
 
-          // fix #1221 node name in ssh+cluster
-          let name = `${options.host}:${options.port}`;
-          name = clusterNodeNames[name] || name;
-
-          const keys = this.initDbKeys(this.initStatus(reply), name);
-
-          // clear only when first reply, avoid jitter
-          if (this.DBKeys.length === nodes.length) {
-            this.DBKeys = [];
-          }
-
-          this.DBKeys = this.DBKeys.concat(keys);
-          // sort by node name
-          this.DBKeys.sort((a, b) => (a.name > b.name ? 1 : -1));
-        }).catch((e) => {
-          this.$message.error(e.message);
-        });
+        rows.sort((a, b) => (a.name > b.name ? 1 : -1));
+        this.DBKeys = rows;
+      }).catch((e) => {
+        this.$message.error(e.message);
       });
     },
     initShortcut() {

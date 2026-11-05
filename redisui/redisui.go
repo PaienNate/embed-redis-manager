@@ -77,6 +77,12 @@ func Register(mux *http.ServeMux, cfg Config) error {
 	}
 	mux.Handle("POST "+prefix+"/api/redis/{connID}/command", cmdHandler)
 
+	var nodesHandler http.Handler = http.HandlerFunc(s.handleClusterNodes)
+	if cfg.Middleware != nil {
+		nodesHandler = cfg.Middleware(nodesHandler)
+	}
+	mux.Handle("GET "+prefix+"/api/redis/{connID}/cluster/nodes", nodesHandler)
+
 	// Build one SockJS handler per enabled connection. A single generic
 	// dispatcher below validates the connID and routes to the right handler
 	// (404 for disabled/unknown connections), so those requests do not fall

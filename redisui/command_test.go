@@ -288,6 +288,64 @@ func TestCommandPing(t *testing.T) {
 	assertReply(t, rec, `{"t":"s","v":"PONG"}`)
 }
 
+// TestCommandStreamCommands exercises the stream command family (XADD / XLEN /
+// XREVRANGE) through the generic endpoint, which is what KeyContentStream.vue
+// relies on via HttpRedisClient.xadd/xlen/xrevrangeBuffer. miniredis supports
+// streams, so this is a real round-trip through the command proxy.
+func TestCommandStreamCommands(t *testing.T) {
+	c := miniredisClient(t)
+	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
+
+	// XADD returns the generated entry id as a bulk string.
+	rec := doCommand(t, mux, "c1", `{"cmd":"xadd","args":["s","*","f","v"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("xadd status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = doCommand(t, mux, "c1", `{"cmd":"xadd","args":["s","*","f","v2"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("xadd2 status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	// XLEN returns an integer.
+	rec = doCommand(t, mux, "c1", `{"cmd":"xlen","args":["s"]}`)
+	assertReply(t, rec, `{"t":"i","v":2}`)
+
+	// XREVRANGE returns [ [id, [field, value, ...]], ... ]; in binary mode
+	// each field/value is a base64 bulk string.
+	rec = doCommand(t, mux, "c1",
+		`{"cmd":"xrevrange","args":["s","+","-","COUNT","10"],"binary":true}`)
+	var env struct {
+		Error *string         `json:"error"`
+		Reply json.RawMessage `json:"reply"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
+	}
+	if env.Error != nil {
+		t.Fatalf("expected null error, got %q", *env.Error)
+	}
+	arr := decodeArray(t, env.Reply)
+	if len(arr) != 2 {
+		t.Fatalf("xrevrange returned %d entries, want 2", len(arr))
+	}
+	// Each entry is [id, [field,value,...]]; assert the first entry shape.
+	entry := decodeArray(t, arr[0])
+	if len(entry) != 2 {
+		t.Fatalf("entry len = %d, want 2", len(entry))
+	}
+	if tag, _ := decodeTag(t, entry[0]); tag != "b" {
+		t.Fatalf("entry id tag = %q, want b", tag)
+	}
+	flat := decodeArray(t, entry[1])
+	if len(flat) != 2 {
+		t.Fatalf("stream flat fields len = %d, want 2", len(flat))
+	}
+	if got := decodeBin(t, flat[0]); got != "f" {
+		t.Fatalf("first field = %q, want f", got)
+	}
+}
+
 func TestCommandDBSize(t *testing.T) {
 	c := miniredisClient(t)
 	for _, k := range []string{"a", "b", "c"} {

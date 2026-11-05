@@ -65,7 +65,19 @@ export default class HttpRedisClient {
     // base64 (decoded to []byte by the backend and sent to redis as a
     // binary-safe bulk), everything else becomes {t:"s"} (a plain string; the
     // backend stringifies numbers, e.g. LRANGE start/stop, on its side).
-    const encodedArgs = args.map((a) => {
+    // ioredis allows a command's arguments to be passed as a single array
+    // (e.g. `call('JSON.SET', [key, '$', value])`); flatten one level so the
+    // proxy always receives flat, individually-typed command arguments.
+    const flatArgs = [];
+    for (const a of args) {
+      if (Array.isArray(a)) {
+        flatArgs.push(...a);
+      } else {
+        flatArgs.push(a);
+      }
+    }
+
+    const encodedArgs = flatArgs.map((a) => {
       if (Buffer.isBuffer(a) || a instanceof Uint8Array) {
         return { t: 'b', v: Buffer.from(a).toString('base64') };
       }
@@ -124,6 +136,29 @@ export default class HttpRedisClient {
     return this.callBuffer('ZREVRANGE', ...args);
   }
 
+  // Redis Streams: XADD / XDEL / XLEN / XREVRANGE (binary-safe). The stream
+  // component reads IDs/fields back as Buffers, so the range is fetched via
+  // the binary reply mode.
+  xadd(key, id, fieldValues) {
+    if (fieldValues && !Array.isArray(fieldValues)) {
+      fieldValues = [fieldValues];
+    }
+    return this.call('XADD', key, id, ...(fieldValues || []));
+  }
+
+  xdel(key, ...ids) {
+    return this.call('XDEL', key, ...ids);
+  }
+
+  xlen(key) {
+    return this.call('XLEN', key);
+  }
+
+  xrevrangeBuffer(...args) {
+    if (args.length === 1 && Array.isArray(args[0])) args = args[0];
+    return this.callBuffer('XREVRANGE', ...args);
+  }
+
   async *_scanStream(command, key, opts, binary) {
     const callFn = binary ? this.callBuffer.bind(this) : this.call.bind(this);
     const match = opts && opts.match;
@@ -174,8 +209,24 @@ export default class HttpRedisClient {
     return this.call('SCAN', ...args);
   }
 
-  nodes() {
-    return Promise.resolve(null);
+  async nodes() {
+    // GET {apiBase}/redis/{connID}/cluster/nodes. The backend returns
+    // `{ error, nodes }` where nodes is an empty array for a non-cluster
+    // connection and a list of cluster node descriptors otherwise.
+    const url = `${this.apiBase}/redis/${this.connID}/cluster/nodes`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const e = new Error(`Redis HTTP ${resp.status} ${resp.statusText}`);
+      this.emit('error', e);
+      throw e;
+    }
+    const data = await resp.json();
+    if (data.error) {
+      const e = new Error(data.error);
+      this.emit('error', e);
+      throw e;
+    }
+    return data.nodes || [];
   }
 
   ping() {
