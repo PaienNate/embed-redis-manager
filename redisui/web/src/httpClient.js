@@ -13,6 +13,8 @@
 // When `binary` is true, bulk strings/array elements are base64 and are
 // restored as Buffers on the JS side.
 
+import { Buffer } from 'buffer';
+
 function decodeReply(reply, binary) {
   switch (reply.t) {
     case 's':
@@ -45,7 +47,7 @@ export default class HttpRedisClient {
 
   async _send(cmd, args, binary) {
     const encodedArgs = args.map((a) => {
-      if (typeof Buffer !== 'undefined' && Buffer.isBuffer(a)) {
+      if (Buffer.isBuffer(a)) {
         return a.toString('base64');
       }
       return a;
