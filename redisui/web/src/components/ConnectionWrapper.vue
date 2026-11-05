@@ -122,6 +122,11 @@ export default {
 
       // connection is ready
       else {
+        // HttpRedisClient.status is always 'ready' (no on('ready') event), so
+        // open the status tab and start the heartbeat ping right here, matching
+        // the behavior of the not-ready/on('ready') branch above.
+        this.$bus.$emit('openStatus', client, this.config.connectionName);
+        this.startPingInterval();
         this.initShow();
         callback && callback();
       }
