@@ -88,6 +88,7 @@
 <script>
 import FormatViewer from '@/components/FormatViewer';
 import { VxeTable, VxeColumn } from 'vxe-table';
+import createScanStream from '@/scanStream';
 
 export default {
   data() {
@@ -189,9 +190,9 @@ export default {
       const scanOption = { match: this.getScanMatch(), count: this.pageSize };
       scanOption.match != '*' && (scanOption.count = this.searchPageSize);
 
-      this.scanStream = this.client.zscanBufferStream(
-        this.redisKey,
-        scanOption,
+      this.scanStream = createScanStream(
+        this.client.zscanBufferStream(this.redisKey, scanOption),
+        scanOption.count,
       );
 
       this.scanStream.on('data', (reply) => {
@@ -225,10 +226,14 @@ export default {
       const zsetData = [];
 
       for (let i = 0; i < list.length; i += 2) {
+        // scores come back as Buffers in binary mode; coerce to number safely.
+        const raw = list[i + 1];
+        const score = typeof raw === 'object' && raw !== null && raw.toString
+          ? raw.toString()
+          : raw;
         zsetData.push({
-          score: Number(list[i + 1]),
+          score: Number(score),
           member: list[i],
-          // memberDisplay: this.$util.bufToString(list[i]),
         });
       }
 

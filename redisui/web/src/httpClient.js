@@ -33,7 +33,7 @@ function decodeReply(reply, binary) {
 }
 
 export default class HttpRedisClient {
-  constructor(connID) {
+  constructor(connID, options = {}) {
     this.connID = connID;
 
     const apiBase =
@@ -43,15 +43,28 @@ export default class HttpRedisClient {
 
     this.status = 'ready';
     this._listeners = {};
+
+    // The backend owns the actual socket; a SELECT is issued on demand, so we
+    // track the current db here for the various components that read
+    // `condition`/`options` to decide whether a db switch is needed.
+    const db = parseInt(options.db) || 0;
+    this.condition = { select: db, subscriber: {} };
+    this.options = {
+      connectionName: options.connectionName != null ? options.connectionName : null,
+      db,
+    };
+    // INFO-derived server version info, populated by the Status tab; default to
+    // an empty object so readers (e.g. hash field-TTL feature detection) don't
+    // crash on an undefined `ardmInfo`.
+    this.ardmInfo = {};
   }
 
   async _send(cmd, args, binary) {
-    const encodedArgs = args.map((a) => {
-      if (Buffer.isBuffer(a)) {
-        return a.toString('base64');
-      }
-      return a;
-    });
+    // Args are forwarded to Go verbatim as command arguments and the backend
+    // decodes them into a []string, so every arg must be a string: Buffers are
+    // converted to their UTF-8 form (matching how the value was read back as a
+    // Buffer) and numbers (e.g. LRANGE start/stop) are stringified.
+    const encodedArgs = args.map((a) => (Buffer.isBuffer(a) ? a.toString() : String(a)));
 
     const resp = await fetch(this.url, {
       method: 'POST',
@@ -85,6 +98,24 @@ export default class HttpRedisClient {
 
   getBuffer(key) {
     return this.callBuffer('GET', key);
+  }
+
+  // Binary (base64) variants for the value-editing commands that read back
+  // actual bytes. These accept either `(key, ...)` or a single array argument,
+  // matching the way the content components invoke them.
+  lrangeBuffer(...args) {
+    if (args.length === 1 && Array.isArray(args[0])) args = args[0];
+    return this.callBuffer('LRANGE', ...args);
+  }
+
+  zrangeBuffer(...args) {
+    if (args.length === 1 && Array.isArray(args[0])) args = args[0];
+    return this.callBuffer('ZRANGE', ...args);
+  }
+
+  zrevrangeBuffer(...args) {
+    if (args.length === 1 && Array.isArray(args[0])) args = args[0];
+    return this.callBuffer('ZREVRANGE', ...args);
   }
 
   async *_scanStream(command, key, opts, binary) {
@@ -205,6 +236,8 @@ const COMMAND_ALIASES = {
   llen: 'LLEN',
   lindex: 'LINDEX',
   lset: 'LSET',
+  linsert: 'LINSERT',
+  lrem: 'LREM',
   sadd: 'SADD',
   srem: 'SREM',
   smembers: 'SMEMBERS',
@@ -242,3 +275,13 @@ for (const alias of Object.keys(COMMAND_ALIASES)) {
     return this.call(cmd, ...args);
   };
 }
+
+// `select` needs to track the current db in `condition.select`/`options.db`
+// (the alias loop above would otherwise discard that state), so override it.
+HttpRedisClient.prototype.select = async function (index) {
+  const reply = await this.call('SELECT', index);
+  const db = parseInt(index);
+  this.condition.select = db;
+  this.options.db = db;
+  return reply;
+};

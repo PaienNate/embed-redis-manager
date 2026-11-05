@@ -99,6 +99,7 @@ import FormatViewer from '@/components/FormatViewer';
 import InputBinary from '@/components/InputBinary';
 import { VxeTable, VxeColumn } from 'vxe-table';
 import versionCompare from 'node-version-compare';
+import createScanStream from '@/scanStream';
 
 export default {
   data() {
@@ -127,7 +128,7 @@ export default {
         : this.$t('message.add_new_line');
     },
     ttlSupport() {
-      const info = this.client.ardmInfo;
+      const info = this.client.ardmInfo || {};
 
       // valkey >= 9.0
       if (info.valkey_version) {
@@ -135,7 +136,7 @@ export default {
       }
 
       // avaiable since redis >= 7.4
-      return versionCompare(info.redis_version, '7.4') >= 0;
+      return info.redis_version && versionCompare(info.redis_version, '7.4') >= 0;
     },
   },
   watch: {
@@ -193,9 +194,9 @@ export default {
       const scanOption = { match: this.getScanMatch(), count: this.pageSize };
       scanOption.match != '*' && (scanOption.count = this.searchPageSize);
 
-      this.scanStream = this.client.hscanBufferStream(
-        this.redisKey,
-        scanOption,
+      this.scanStream = createScanStream(
+        this.client.hscanBufferStream(this.redisKey, scanOption),
+        scanOption.count,
       );
 
       this.scanStream.on('data', (reply) => {

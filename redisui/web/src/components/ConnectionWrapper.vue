@@ -168,7 +168,10 @@ export default {
       // Embedded build: connections are pre-established by the backend and
       // identified by the backend-provided `id` (the connID), so we create an
       // HttpRedisClient proxy bound to it instead of a direct redis socket.
-      const clientPromise = redisClient.createConnection(configCopy.id);
+      const clientPromise = redisClient.createConnection(configCopy.id, {
+        connectionName: this.config.connectionName,
+        db: this.lastSelectedDb,
+      });
 
       clientPromise.then((client) => {
         this.client = client;

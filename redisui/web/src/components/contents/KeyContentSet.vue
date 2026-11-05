@@ -73,6 +73,7 @@
 <script>
 import FormatViewer from '@/components/FormatViewer';
 import { VxeTable, VxeColumn } from 'vxe-table';
+import createScanStream from '@/scanStream';
 
 export default {
   data() {
@@ -142,9 +143,9 @@ export default {
       const scanOption = { match: this.getScanMatch(), count: this.pageSize };
       scanOption.match != '*' && (scanOption.count = this.searchPageSize);
 
-      this.scanStream = this.client.sscanBufferStream(
-        this.redisKey,
-        scanOption,
+      this.scanStream = createScanStream(
+        this.client.sscanBufferStream(this.redisKey, scanOption),
+        scanOption.count,
       );
 
       this.scanStream.on('data', (reply) => {

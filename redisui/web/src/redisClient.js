@@ -11,8 +11,10 @@ import HttpRedisClient from '@/httpClient.js';
 
 export default {
   // Return an ioredis-compatible proxy bound to the backend connection `connID`.
-  createConnection(connID) {
-    return Promise.resolve(new HttpRedisClient(connID));
+  // `options` optionally carries the display `connectionName` / initial `db`
+  // so the proxy can track `condition.select`/`options.db` for db switching.
+  createConnection(connID, options) {
+    return Promise.resolve(new HttpRedisClient(connID, options));
   },
 
   // SSH tunnels are not supported in the embedded build: the Go backend
