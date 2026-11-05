@@ -74,7 +74,7 @@ type Config struct {
 }
 func Register(mux *http.ServeMux, cfg Config) error
 ```
-做法：`Prefix` 默认 `/redisui`；把连接按 `ID` 建索引存到内部 `server` 结构；`Register` 把后续各任务的处理器挂到 `cfg.Prefix` 前缀下（本任务先挂占位 `GET {prefix}/api/connections` 返回连接列表 JSON）。`Middleware` 非空则用它包裹。
+做法：`Prefix` 默认 `/redisui`；把连接按 `ID` 建索引存到内部 `server` 结构；`Register` 把后续各任务的处理器挂到 `cfg.Prefix` 前缀下（本任务先挂占位 `GET {prefix}/api/connections` 返回连接列表 JSON，形状固定为 `[{"id":"...","name":"...","enabled":true}]`，`enabled=false` 的连接不出现在列表、其命令端点返回 404）。`Middleware` 非空则用它包裹。
 
 - [ ] **步骤 4：运行测试验证通过**
 
@@ -185,7 +185,7 @@ func TestStaticAssetServed(t *testing.T) { /* GET {prefix}/static/js/*.js 返回
 
 - [ ] **步骤 3：实现 embed 与静态文件服务**
 
-`redisui/embed.go` 用 `//go:embed all:web/dist` 声明 `var distFS embed.FS`；`redisui.go` 的 `server` 增加 `frontend fs.FS`，用 `http.FileServerFS`（或用 `http.FileServer` 包一层）挂到 `{prefix}/`，并处理 SPA 的 history 回落到 `index.html`。因为 `redisui/embed.go` 与 `redisui/web/dist` 同仓库层级，`//go:embed web/dist` 可直接命中。
+`redisui/embed.go` 用 `//go:embed all:web/dist` 声明 `var distFS embed.FS`；`redisui.go` 的 `server` 增加 `frontend fs.FS`，用 `http.FileServerFS`（或用 `http.FileServer` 包一层）挂到 `{prefix}/`，并处理 SPA 的 history 回落到 `index.html`。因为 `redisui/embed.go` 与 `redisui/web/dist` 同仓库层级，`//go:embed web/dist` 可直接命中。**返回 `{prefix}` 下的 index.html 时注入 `<script>window.__REDISUI__={apiBase:"{prefix}/api"}</script>`，供前端（任务 5）读取 API 前缀。**
 
 - [ ] **步骤 4：运行测试验证通过**
 
@@ -223,7 +223,7 @@ test('call rejects on error reply', async () => { /* reply.error → promise rej
 
 - [ ] **步骤 3：在 `redisui/web/src/httpClient.js` 实现 `HttpRedisClient`**
 
-签名：`constructor(base, connID)`；方法 `call(cmd, ...args)`、`callBuffer`、`getBuffer`、`scan(cursor,match,count)`、`nodes()`、`ping()`、`quit()`、`duplicate()`、`on(event,fn)`、`status`。类型映射规则见任务 2；`*scanBufferStream` 返回一个实现 `[Symbol.asyncIterator]` 的对象，内部用 `SCAN` 游标 `while` 循环逐页请求。
+签名：`constructor(connID)`（API base 从 `window.__REDISUI__.apiBase` 读取，默认 `/api`）；方法 `call(cmd, ...args)`、`callBuffer`、`getBuffer`、`scan(cursor,match,count)`、`nodes()`、`ping()`、`quit()`、`duplicate()`、`on(event,fn)`、`status`。类型映射规则见任务 2；`*scanBufferStream` 返回一个实现 `[Symbol.asyncIterator]` 的对象，内部用 `SCAN` 游标 `while` 循环逐页请求（走泛化命令端点 `call('SCAN', cursor, 'MATCH', match, 'COUNT', count)`）。`scan`/`ping`/`dbsize` 一律走泛化命令端点，不做专用端点。
 
 - [ ] **步骤 4：运行测试验证通过**
 
@@ -268,11 +268,11 @@ git commit -m "feat(web): use HttpRedisClient and backend connection list"
 
 **文件：**
 - 修改：`redisui/web/src/components/KeyList.vue`、`KeyListNormal.vue`、`KeyListVirtualTree.vue`、`OperateItem.vue`
-- 修改/新增：`redisui/scan.go` + `redisui/scan_test.go`（如需专门 scan/dbsize 端点）
+- 修改：`redisui/command.go`、`redisui/command_test.go`（如需补充 `SCAN`/`PING`/`DBSIZE` 的泛化命令测试）
 
-- [ ] **步骤 1：后端补 `ping`/`dbsize`/`scan` 端点（若走专用端点）**
+- [ ] **步骤 1：确认 `SCAN`/`PING`/`DBSIZE` 经泛化命令端点覆盖**
 
-`redisui/scan.go` 提供 `GET {prefix}/api/redis/{connID}/scan?cursor=&match=&count=`；写 miniredis 测试覆盖游标翻页与多匹配。
+在 `redisui/command_test.go` 里补 `SCAN` 游标翻页、`PING`、`DBSIZE` 的 miniredis 集成用例子（统一走 `POST /command`，body `{cmd:"scan",args:[...]}`），验证带 `MATCH`/`COUNT` 与多匹配。
 
 - [ ] **步骤 2：改 KeyList/OperateItem 用代理**
 
@@ -285,7 +285,7 @@ git commit -m "feat(web): use HttpRedisClient and backend connection list"
 - [ ] **步骤 4：Commit**
 
 ```bash
-git add redisui/scan.go redisui/scan_test.go redisui/web/src/components/KeyList*.vue redisui/web/src/components/OperateItem.vue
+git add redisui/command.go redisui/command_test.go redisui/web/src/components/KeyList*.vue redisui/web/src/components/OperateItem.vue
 git commit -m "feat(redisui,web): key browse, search and dbsize"
 ```
 
