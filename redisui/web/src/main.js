@@ -37,8 +37,9 @@ Vue.config.productionTip = false;
 const vue = new Vue({
   el: '#app',
   i18n,
-  components: { App },
-  template: '<App/>',
+  // render function (no runtime template compilation needed — the bundle ships
+  // the runtime-only Vue build; a `template` string would compile to nothing).
+  render: (h) => h(App),
 });
 
 // handle uncaught exception (browser: window error handler)
