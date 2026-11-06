@@ -58,3 +58,4 @@
 - 替换 Monaco 为 CodeMirror（IE11 兼容、体积大减）；fetch 换 axios（XHR + 30s 超时）；新增 IE11 legacy 构建。
 - **Font Awesome 字体子集化**：只保留实际使用的 29 个字形，字体 ≈930 KB → woff2 ≈3 KB / woff ≈4 KB / ttf ≈6 KB；模板仍是 `<i class="fa fa-*">`，`currentColor` 继承不变。用 `npm run subset-icons`（`scripts/subset-fontawesome.js`）在增删图标后重新生成。
 - 页面缩放（Page Zoom）现在真正生效（通过 CSS `zoom` 应用到 `document.body`；之前是 Electron 专属的空实现，0.5–2.0 可调，刷新后保持）。
+- CodeMirror 编辑器：补齐 `foldgutter` addon（折叠栏不再是空白条），并用 ResizeObserver 在容器尺寸变化/切 tab 后自动 `refresh()`，修复正文与光标错位。

@@ -12,7 +12,7 @@
 </template>
 
 <script type="text/javascript">
-import { createEditor } from '@/lib/codeEditor';
+import { createEditor, destroyEditor } from '@/lib/codeEditor';
 import JSONbigFactory from '@qii404/json-bigint';
 
 const JSONbig = JSONbigFactory({ useNativeBigInt: false });
@@ -99,14 +99,14 @@ export default {
       readOnly: this.readOnly,
     });
 
+    this.$nextTick(() => this.codeEditor && this.codeEditor.refresh());
     window.addEventListener('resize', this.onResize);
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.onResize);
 
     if (this.codeEditor) {
-      const wrapper = this.codeEditor.getWrapperElement();
-      wrapper && wrapper.parentNode && wrapper.parentNode.removeChild(wrapper);
+      destroyEditor(this.codeEditor);
       this.codeEditor = null;
     }
 
