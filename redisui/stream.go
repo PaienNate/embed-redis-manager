@@ -70,6 +70,11 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 // or Recv/Send errors), the active subscription is torn down.
 func (s *server) runStream(client redis.UniversalClient, sess sockjs.Session) {
 	ctrl := make(chan streamControl)
+	// done lets the Recv goroutine exit instead of blocking forever on `ctrl <-`
+	// if runStream returns (e.g. Send failed) while the goroutine is between
+	// Recv and the channel send.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		defer close(ctrl)
 		for {
@@ -84,7 +89,11 @@ func (s *server) runStream(client redis.UniversalClient, sess sockjs.Session) {
 				sendStream(sess, streamEvent{Type: "error", Error: "invalid stream control message"})
 				continue
 			}
-			ctrl <- ctrlMsg
+			select {
+			case ctrl <- ctrlMsg:
+			case <-done:
+				return
+			}
 		}
 	}()
 

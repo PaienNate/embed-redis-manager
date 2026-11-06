@@ -161,11 +161,19 @@ export default {
         const MAX_CONCURRENT = 8;
         let next = 0;
         let deleted = 0;
+        let aborted = false;
         const worker = async () => {
-          while (next < chunks.length) {
+          while (!aborted && next < chunks.length) {
             const chunk = chunks[next++];
-            const reply = await this.client.del(chunk);
-            deleted += Number(reply) || 0;
+            try {
+              const reply = await this.client.del(chunk);
+              deleted += Number(reply) || 0;
+            } catch (e) {
+              // Stop the other workers from consuming more chunks; in-flight
+              // requests finish but no new ones start after a failure.
+              aborted = true;
+              throw e;
+            }
           }
         };
         await Promise.all(

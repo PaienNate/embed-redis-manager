@@ -167,7 +167,9 @@ func TestFullEmbeddedFlow(t *testing.T) {
 	})
 
 	t.Run("SCAN lists keys and DBSIZE is correct", func(t *testing.T) {
-		for _, k := range []string{"user:1", "user:2", "order:9"} {
+		// Self-contained: seed every key this subtest asserts on, so it passes
+		// when run alone (e.g. -run TestFullEmbeddedFlow/SCAN).
+		for _, k := range []string{"user:1", "user:2", "order:9", "greeting"} {
 			if err := c.Set(context.Background(), k, "v", 0).Err(); err != nil {
 				t.Fatalf("seed %s: %v", k, err)
 			}
@@ -197,4 +199,60 @@ func TestFullEmbeddedFlow(t *testing.T) {
 		reply := postCommand(t, srv.URL, connID, `{"cmd":"get","args":["absent"]}`)
 		assertReplyJSON(t, reply, `{"t":"n"}`)
 	})
+}
+
+// TestDisabledConnectionReturns404 verifies that an Enabled:false connection is
+// hidden from the list and that its command / cluster / stream endpoints return
+// 404 (rather than falling through to the SPA catch-all).
+func TestDisabledConnectionReturns404(t *testing.T) {
+	c := miniredisClient(t)
+	mux := http.NewServeMux()
+	if err := Register(mux, Config{Prefix: "/r", Connections: []Connection{
+		{ID: "off", Name: "disabled", Client: c, Enabled: false},
+	}}); err != nil {
+		t.Fatalf("Register error: %v", err)
+	}
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/r/api/connections")
+	if err != nil {
+		t.Fatalf("GET connections: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var list []map[string]interface{}
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatalf("unmarshal connections: %v; body=%s", err, body)
+	}
+	if len(list) != 0 {
+		t.Fatalf("disabled connection leaked into list: %s", body)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"command", http.MethodPost, "/r/api/redis/off/command", `{"cmd":"ping"}`},
+		{"cluster nodes", http.MethodGet, "/r/api/redis/off/cluster/nodes", ""},
+		{"stream", http.MethodGet, "/r/api/redis/off/stream/", ""},
+	} {
+		req, err := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader(tc.body))
+		if err != nil {
+			t.Fatalf("%s: NewRequest: %v", tc.name, err)
+		}
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: Do: %v", tc.name, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", tc.name, resp.StatusCode)
+		}
+	}
 }

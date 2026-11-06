@@ -161,6 +161,11 @@ func (s *server) commandExecutor(conn Connection, req commandRequest) (commandRu
 	// body's db field with its target.
 	desiredDB := req.DB
 	selectTarget, hasSelectTarget := selectTargetDB(req.Args)
+	// A negative db is invalid: don't pin (and cache) a client to it. Leave the
+	// SELECT to the server, which rejects it, so no useless db client is kept.
+	if hasSelectTarget && selectTarget < 0 {
+		hasSelectTarget = false
+	}
 	if strings.EqualFold(req.Cmd, "SELECT") && hasSelectTarget {
 		desiredDB = selectTarget
 	}

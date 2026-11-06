@@ -83,12 +83,14 @@ export default {
     connectionTitle() {
       const { config } = this;
       const sep = '-----------';
-      const lines = [
-        config.connectionName,
-        sep,
-        `${this.$t('message.host')}: ${config.host}`,
-        `${this.$t('message.port')}: ${config.port}`,
-      ];
+      const lines = [config.connectionName];
+      // The embedded build's connection DTO has no host/port, so only show
+      // them when present (avoids "Host: undefined" in the tooltip).
+      if (config.host || config.port) {
+        lines.push(sep);
+        config.host && lines.push(`${this.$t('message.host')}: ${config.host}`);
+        config.port && lines.push(`${this.$t('message.port')}: ${config.port}`);
+      }
 
       config.username && lines.push(`${this.$t('message.username')}: ${config.username}`);
       config.separator && lines.push(`${this.$t('message.separator')}: "${config.separator}"`);

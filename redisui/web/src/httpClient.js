@@ -78,6 +78,10 @@ export default class HttpRedisClient {
     // an empty object so readers (e.g. hash field-TTL feature detection) don't
     // crash on an undefined `ardmInfo`.
     this.ardmInfo = {};
+
+    // Short-lived cache for cluster nodes() so the key list's per-scan
+    // getScanNodes() call does not fire a /cluster/nodes request every scan.
+    this._nodesCache = null;
   }
 
   async _send(cmd, args, binary) {
@@ -259,6 +263,10 @@ export default class HttpRedisClient {
     // GET {apiBase}/redis/{connID}/cluster/nodes. The backend returns
     // `{ error, nodes }` where nodes is an empty array for a non-cluster
     // connection and a list of cluster node descriptors otherwise.
+    const now = Date.now();
+    if (this._nodesCache && now - this._nodesCache.at < 30000) {
+      return this._nodesCache.nodes;
+    }
     const url = `${this.apiBase}/redis/${this.connID}/cluster/nodes`;
     let resp;
     try {
@@ -275,7 +283,9 @@ export default class HttpRedisClient {
       // like in _send, it does not mean the connection is broken.
       throw new Error(data.error);
     }
-    return data.nodes || [];
+    const nodes = data.nodes || [];
+    this._nodesCache = { at: now, nodes };
+    return nodes;
   }
 
   ping() {
@@ -287,7 +297,12 @@ export default class HttpRedisClient {
   }
 
   duplicate() {
-    return new HttpRedisClient(this.connID);
+    // Carry the current db/connection name so a CLI duplicate starts on the
+    // same db as the main client instead of silently defaulting to 0.
+    return new HttpRedisClient(this.connID, {
+      db: (this.condition && this.condition.select) || 0,
+      connectionName: this.options && this.options.connectionName,
+    });
   }
 
   on(event, fn) {

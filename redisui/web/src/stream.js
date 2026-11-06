@@ -136,6 +136,9 @@ export default class RedisStream {
       this._sock = null;
     }
     this._connected = false;
+    // Don't replay a subscription if this instance is ever reconnected after
+    // an explicit close (only stop() cleared it before).
+    this._lastControl = null;
   }
 }
 

@@ -32,8 +32,17 @@ const THEME_CSS = {
   dark: 'static/theme/dark/index.css',
 };
 
+function resolveTheme(theme) {
+  if (theme === 'dark' || theme === 'light') {
+    return theme;
+  }
+  // "system" (or unset): follow the OS preference.
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark' : 'light';
+}
+
 function applyTheme(theme) {
-  const t = theme === 'dark' ? 'dark' : 'light';
+  const t = resolveTheme(theme);
   let link = document.getElementById('theme-link');
   if (!link) {
     link = document.createElement('link');
@@ -55,11 +64,24 @@ window.globalChangeTheme = (theme) => {
 };
 
 // initial theme: stored preference, otherwise follow the OS preference
+applyTheme(localStorage.theme);
+
+// when the theme is "system", react to OS light/dark changes
 (() => {
-  const stored = localStorage.theme;
-  const prefersDark = window.matchMedia
-    && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  applyTheme(stored === 'dark' || stored === 'light' ? stored : (prefersDark ? 'dark' : 'light'));
+  const mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+  if (!mq) {
+    return;
+  }
+  const onChange = () => {
+    if (localStorage.theme !== 'light' && localStorage.theme !== 'dark') {
+      applyTheme('system');
+    }
+  };
+  if (mq.addEventListener) {
+    mq.addEventListener('change', onChange);
+  } else if (mq.addListener) {
+    mq.addListener(onChange); // IE11
+  }
 })();
 
 // vxe-table

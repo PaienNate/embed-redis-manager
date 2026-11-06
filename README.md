@@ -87,7 +87,12 @@ cfg := redisui.Config{
     Connections: []redisui.Connection{{ID: "local", Client: client, Enabled: true}},
     Middleware: func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            if r.Header.Get("Authorization") != "Bearer secret" {
+            // The UI is loaded by navigating a browser to {prefix}/, and a
+            // browser navigation cannot send an Authorization header. Check a
+            // cookie/session here (or terminate auth at your gateway). A
+            // Bearer-header check only works if the UI is driven by an API
+            // client, not by opening the page in a browser.
+            if c, err := r.Cookie("session"); err != nil || !validSession(c.Value) {
                 http.Error(w, "unauthorized", http.StatusUnauthorized)
                 return
             }
@@ -97,8 +102,9 @@ cfg := redisui.Config{
 }
 ```
 
-A request missing the required header is rejected (`401`) before reaching any
-handler. Leave `Middleware` nil to disable wrapping.
+(`validSession` is your own session check.) A request without a valid session is
+rejected (`401`) before reaching any handler. Leave `Middleware` nil to disable
+wrapping.
 
 ### 5. DB selection (multiple databases)
 

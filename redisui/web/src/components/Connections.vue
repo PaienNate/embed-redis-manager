@@ -299,6 +299,13 @@ export default {
         normalized.name = item.name;
         normalized.connectionName = item.name;
         normalized.key = item.id;
+        // Restore the per-connection color tag saved locally (see
+        // ConnectionWrapper.setColor); the backend DTO has no color field.
+        try {
+          normalized.color = localStorage.getItem(`redisui:color:${item.id}`) || '';
+        } catch (e) {
+          normalized.color = '';
+        }
         return normalized;
       });
       this.initGroups();

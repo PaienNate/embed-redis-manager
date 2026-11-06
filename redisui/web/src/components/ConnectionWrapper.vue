@@ -203,8 +203,18 @@ export default {
       const ulDom = this.$refs.connectionMenu.$el;
       const className = 'menu-with-custom-color';
 
-      // save to setting
-      save && this.$storage.editConnectionItem(this.config, { color });
+      // Persist per connection id in localStorage. The embedded build's
+      // connections are injected by the host (not stored locally), so
+      // editConnectionItem() has nothing to write to.
+      if (save && this.config.id) {
+        try {
+          if (color) {
+            localStorage.setItem(`redisui:color:${this.config.id}`, color);
+          } else {
+            localStorage.removeItem(`redisui:color:${this.config.id}`);
+          }
+        } catch (e) { /* ignore quota/security errors */ }
+      }
 
       if (!color) {
         ulDom.classList.remove(className);
@@ -224,7 +234,15 @@ export default {
     },
   },
   mounted() {
-    this.setColor(this.config.color, false);
+    let color = this.config.color;
+    if (!color && this.config.id) {
+      try {
+        color = localStorage.getItem(`redisui:color:${this.config.id}`) || '';
+      } catch (e) {
+        color = '';
+      }
+    }
+    this.setColor(color, false);
   },
   beforeDestroy() {
     this.closeConnection(this.config.connectionName);

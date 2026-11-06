@@ -111,8 +111,11 @@ func splitClusterAddr(addr string) (host, port string) {
 	if i := strings.IndexByte(addr, '@'); i >= 0 {
 		addr = addr[:i]
 	}
-	h, p, _ := strings.Cut(addr, ":")
-	return h, p
+	// Split on the last ':' so IPv6 literals like [2001:db8::1]:6379 work.
+	if i := strings.LastIndexByte(addr, ':'); i >= 0 {
+		return addr[:i], addr[i+1:]
+	}
+	return addr, ""
 }
 
 func clusterNodeRole(flags string) string {
