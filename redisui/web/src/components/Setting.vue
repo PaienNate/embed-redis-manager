@@ -39,34 +39,6 @@
               </el-input-number>
             </el-form-item>
           </el-col>
-          <el-col :sm="12" :lg="7">
-            <!-- font-family -->
-            <el-form-item :label="$t('message.font_family')">
-              <span slot="label">
-                {{ $t('message.font_family') }}
-                <el-popover
-                  placement="top-start"
-                  :title="$t('message.font_faq_title')"
-                  trigger="hover">
-                  <i slot="reference" class="el-icon-question"></i>
-                  <p v-html="$t('message.font_faq')"></p>
-                </el-popover>
-                <i v-if="loadingFonts" class="el-icon-loading"></i>
-              </span>
-              <!-- font-family select -->
-              <el-select v-model="form.fontFamily" @visible-change="getAllFonts" allow-create default-first-option
-                         filterable multiple class="setting-font-select">
-                <el-option
-                  v-for="(font, index) in allFonts"
-                  :key="index"
-                  :label="font"
-                  :value="font">
-                  <!-- for better performance, do not display font-family -->
-                  <!-- :style="{'font-family': font}"> -->
-                </el-option>
-              </el-select>
-            </el-form-item>
-          </el-col>
         </el-row>
       </el-card>
 
@@ -141,8 +113,6 @@ export default {
       },
       appVersion: (window.__REDISUI__ && window.__REDISUI__.version) || '',
       // electronVersion: process.versions.electron,
-      allFonts: [],
-      loadingFonts: false,
       themeMode: 'system',
     };
   },
@@ -186,28 +156,6 @@ export default {
     changeZoom() {
       // window/zoom factor is an Electron concept, noop in a browser build
     },
-    bindGetAllFonts() {
-      // system font enumeration is provided by Electron's ipcRenderer in the
-      // desktop build; in the browser use a sensible static default list.
-      this.allFonts = [
-        'Default Initial',
-        'serif',
-        'sans-serif',
-        'monospace',
-        'Menlo',
-        'Consolas',
-        'Monaco',
-        'Courier New',
-        'Ubuntu Mono',
-      ];
-      this.loadingFonts = false;
-    },
-    getAllFonts() {
-      if (this.allFonts.length === 0) {
-        this.loadingFonts = true;
-        this.bindGetAllFonts();
-      }
-    },
     clearCache() {
       this.$confirm(this.$t('message.clear_cache_tip')).then(() => {
         localStorage.clear();
@@ -222,7 +170,6 @@ export default {
   },
   mounted() {
     this.restoreSettings();
-    this.bindGetAllFonts();
   },
 };
 </script>
