@@ -37,7 +37,7 @@
 
 - 命令日志已接线（`setCommandLogSink` 转发每条命令到 `CommandLog`，ping 过滤）。
 - 版本号由后端 `Config.Version` 注入，设置页显示。
-- 连接 tooltip 不再显示 `Host: undefined`（无 host/port 时省略）。
+- 连接 tooltip 的 host/port 由后端从注入 client 的 `Options().Addr` 派生（standalone/failover 用 `Addr`，cluster/ring 取首个地址），不再显示 `Host: undefined`。
 - 连接颜色改为按 connID 存 localStorage，刷新后可恢复。
 - `duplicate()` 携带 db / connectionName，CLI 与主 client 的 db 状态一致。
 - 批量删除某块失败后会中止其余 worker，避免"提示失败但仍在删除"。

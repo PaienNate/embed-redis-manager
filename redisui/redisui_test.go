@@ -52,6 +52,8 @@ func TestConnectionsEndpointJSONShape(t *testing.T) {
 		ID      string `json:"id"`
 		Name    string `json:"name"`
 		Enabled bool   `json:"enabled"`
+		Host    string `json:"host"`
+		Port    string `json:"port"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
@@ -61,6 +63,11 @@ func TestConnectionsEndpointJSONShape(t *testing.T) {
 	}
 	if got[0].ID != "c1" || got[0].Name != "主缓存" || !got[0].Enabled {
 		t.Fatalf("unexpected connection: %+v", got[0])
+	}
+	// host/port are derived from the injected client's Options().Addr (shown in
+	// the connection tooltip).
+	if got[0].Host == "" || got[0].Port == "" {
+		t.Fatalf("host/port not derived from client options: %+v", got[0])
 	}
 }
 

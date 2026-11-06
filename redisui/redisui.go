@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -194,6 +195,40 @@ type connectionDTO struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Enabled bool   `json:"enabled"`
+	// Host/Port are derived from the injected client's Options().Addr and are
+	// shown in the connection tooltip. Empty when the address can't be
+	// determined (the frontend then omits them).
+	Host string `json:"host,omitempty"`
+	Port string `json:"port,omitempty"`
+}
+
+// clientHostPort extracts a display host/port from the injected client. It uses
+// the client's own Options(), so it works for standalone/failover (Addr), and
+// the first address for cluster/ring.
+func clientHostPort(c redis.UniversalClient) (host, port string) {
+	var addr string
+	switch v := c.(type) {
+	case *redis.Client:
+		addr = v.Options().Addr
+	case *redis.ClusterClient:
+		if addrs := v.Options().Addrs; len(addrs) > 0 {
+			addr = addrs[0]
+		}
+	case *redis.Ring:
+		// map iteration is random; choose deterministically.
+		for _, a := range v.Options().Addrs {
+			if addr == "" || a < addr {
+				addr = a
+			}
+		}
+	}
+	if addr == "" {
+		return "", ""
+	}
+	if h, p, err := net.SplitHostPort(addr); err == nil {
+		return h, p
+	}
+	return addr, ""
 }
 
 func (s *server) handleConnections(w http.ResponseWriter, _ *http.Request) {
@@ -203,7 +238,8 @@ func (s *server) handleConnections(w http.ResponseWriter, _ *http.Request) {
 		if !c.Enabled {
 			continue
 		}
-		out = append(out, connectionDTO{ID: c.ID, Name: c.Name, Enabled: true})
+		host, port := clientHostPort(c.Client)
+		out = append(out, connectionDTO{ID: c.ID, Name: c.Name, Enabled: true, Host: host, Port: port})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
