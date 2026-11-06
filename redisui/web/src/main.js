@@ -1,4 +1,3 @@
-import 'whatwg-fetch';
 import 'url-polyfill';
 import ResizeObserverPolyfill from 'resize-observer-polyfill';
 import { Buffer } from 'buffer';

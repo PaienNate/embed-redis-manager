@@ -107,6 +107,7 @@
 </template>
 
 <script type="text/javascript">
+import axios from 'axios';
 import storage from '@/storage.js';
 import ConnectionWrapper from '@/components/ConnectionWrapper';
 import ScrollToTop from '@/components/ScrollToTop';
@@ -283,11 +284,8 @@ export default {
 
       let list = [];
       try {
-        const resp = await fetch(`${base}/connections`);
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
-        list = await resp.json();
+        const resp = await axios.get(`${base}/connections`, { timeout: 10000 });
+        list = resp.data;
       } catch (e) {
         // backend unreachable: show an empty list rather than crashing the menu
         list = [];

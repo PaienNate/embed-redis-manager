@@ -29,6 +29,7 @@
 </template>
 
 <script type="text/javascript">
+import axios from 'axios';
 import Setting from '@/components/Setting';
 import Connections from '@/components/Connections';
 import CommandLog from '@/components/CommandLog';
@@ -64,11 +65,8 @@ export default {
     },
     async _pickConnID() {
       try {
-        const resp = await fetch(`${this._apiBase()}/connections`);
-        if (!resp.ok) {
-          return null;
-        }
-        const list = await resp.json();
+        const resp = await axios.get(`${this._apiBase()}/connections`, { timeout: 10000 });
+        const list = resp.data;
         const conn = (list || []).find((c) => c.enabled !== false);
         return conn ? conn.id : null;
       } catch (e) {
@@ -83,13 +81,12 @@ export default {
       }
       this.statusConnID = id;
       try {
-        const resp = await fetch(`${this._apiBase()}/redis/${id}/command`, {
-          method: 'POST',
+        const resp = await axios.post(`${this._apiBase()}/redis/${id}/command`, { cmd: 'ping', args: [] }, {
+          timeout: 10000,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cmd: 'ping', args: [] }),
         });
-        const data = await resp.json();
-        this.connStatus = (resp.ok && !data.error) ? 'connected' : 'disconnected';
+        const data = resp.data || {};
+        this.connStatus = data.error ? 'disconnected' : 'connected';
       } catch (e) {
         this.connStatus = 'disconnected';
         this.statusConnID = ''; // re-resolve the connection next round

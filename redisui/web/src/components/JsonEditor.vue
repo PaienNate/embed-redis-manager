@@ -127,6 +127,15 @@ export default {
     height: 100%;
     background: transparent;
     font-size: 14px;
+    /* Pin line-height to the font size: otherwise it inherits a large value
+       (e.g. 32px) and CodeMirror draws an oversized caret. */
+    line-height: 20px;
+  }
+  .text-formated-container .code-editor-con .CodeMirror pre.CodeMirror-line,
+  .text-formated-container .code-editor-con .CodeMirror pre.CodeMirror-line-like {
+    font-size: inherit;
+    line-height: inherit;
+    font-family: inherit;
   }
   .dark-mode .text-formated-container .code-editor-con .CodeMirror {
     background: #273239;

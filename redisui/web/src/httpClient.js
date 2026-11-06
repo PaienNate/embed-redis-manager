@@ -14,6 +14,20 @@
 // restored as Buffers on the JS side.
 
 import { Buffer } from 'buffer';
+import axios from 'axios';
+
+// Requests use axios (XMLHttpRequest under the hood) rather than fetch: it
+// works in IE11 without a fetch polyfill and gives a real timeout, so a hung
+// backend rejects instead of leaving the promise pending forever.
+const REQUEST_TIMEOUT_MS = 30000;
+
+function httpError(e) {
+  if (e && e.response) {
+    const { status, statusText } = e.response;
+    return new Error(`Redis HTTP ${status}${statusText ? ` ${statusText}` : ''}`);
+  }
+  return e;
+}
 
 // Optional app-level sink for the command-log panel. The app entry registers it
 // (see main.js) so commands are recorded without coupling this module to Vue.
@@ -96,35 +110,21 @@ export default class HttpRedisClient {
     // "the db the injected client is configured with".
     const db = (this.condition && this.condition.select) || 0;
 
-    let resp;
     const start = performance.now();
+    let resp;
     try {
-      resp = await fetch(this.url, {
-        method: 'POST',
+      resp = await axios.post(this.url, { cmd, args: encodedArgs, binary, db }, {
+        timeout: REQUEST_TIMEOUT_MS,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cmd, args: encodedArgs, binary, db }),
       });
     } catch (e) {
-      // Network failure: the connection to the backend is gone.
-      this.emit('error', e);
-      throw e;
+      // Network failure, timeout, or non-2xx HTTP status: connection-level.
+      const err = httpError(e);
+      this.emit('error', err);
+      throw err;
     }
 
-    if (!resp.ok) {
-      // HTTP-layer failure (bad gateway status, 413, ...): connection-level.
-      const e = new Error(`Redis HTTP ${resp.status} ${resp.statusText}`);
-      this.emit('error', e);
-      throw e;
-    }
-
-    let data;
-    try {
-      data = await resp.json();
-    } catch (e) {
-      // Not JSON: transport/protocol problem, not a Redis reply.
-      this.emit('error', e);
-      throw e;
-    }
+    const data = resp.data || {};
 
     // Record the command for the command-log panel (mirrors ARDM's ioredis
     // hook). Logged for both success and Redis command errors; a logging
@@ -262,23 +262,14 @@ export default class HttpRedisClient {
     const url = `${this.apiBase}/redis/${this.connID}/cluster/nodes`;
     let resp;
     try {
-      resp = await fetch(url);
+      resp = await axios.get(url, { timeout: REQUEST_TIMEOUT_MS });
     } catch (e) {
-      this.emit('error', e);
-      throw e;
+      // Network failure, timeout, or non-2xx: connection-level.
+      const err = httpError(e);
+      this.emit('error', err);
+      throw err;
     }
-    if (!resp.ok) {
-      const e = new Error(`Redis HTTP ${resp.status} ${resp.statusText}`);
-      this.emit('error', e);
-      throw e;
-    }
-    let data;
-    try {
-      data = await resp.json();
-    } catch (e) {
-      this.emit('error', e);
-      throw e;
-    }
+    const data = resp.data || {};
     if (data.error) {
       // Command-level failure (e.g. CLUSTER NODES rejected): reject only —
       // like in _send, it does not mean the connection is broken.

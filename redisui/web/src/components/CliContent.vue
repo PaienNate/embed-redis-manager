@@ -90,5 +90,13 @@ export default {
     height: 100%;
     background: transparent;
     font-size: 14px;
+    /* Pin line-height to the font size so the caret isn't oversized. */
+    line-height: 20px;
+  }
+  .cli-content-container .code-editor-con .CodeMirror pre.CodeMirror-line,
+  .cli-content-container .code-editor-con .CodeMirror pre.CodeMirror-line-like {
+    font-size: inherit;
+    line-height: inherit;
+    font-family: inherit;
   }
 </style>
