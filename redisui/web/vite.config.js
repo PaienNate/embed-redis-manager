@@ -79,5 +79,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     chunkSizeWarningLimit: 4000,
+    // Emit small assets (notably the subset woff/ttf) as files instead of
+    // inlining them as data URIs: some legacy browsers (IE11) are unreliable
+    // with data-URI web fonts.
+    assetsInlineLimit: 0,
   },
 });

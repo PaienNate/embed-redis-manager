@@ -14,7 +14,7 @@
 - **WebSocket / SSE 流式主通道**：改用 SockJS 单通道（自动在 WebSocket→XHR-streaming→XHR-polling 间降级），适配受限网络。
 - **设置页的 Font Family 选择**：浏览器无法枚举系统字体，只有固定几个选项、价值低，已从设置页隐藏（默认字体栈仍生效）。
 - **设置页的"检查更新/手动下载"**：内嵌版没有 Electron 自动更新，已移除。
-- **不迁移到 iconify**：图标仍用 Font Awesome 4.7。原因：IE11 不支持 CSS mask（iconify 常用的 `currentColor` 方案），且 key 树的 chevron 由第三方组件用 FA class 渲染，替换成本高。体积优化方向见第三节。
+- **不迁移到 iconify**：图标仍用 Font Awesome 4.7（已做**字体子集化**，见下）。原因：IE11 不支持 CSS mask（iconify 常用的 `currentColor` 方案），且 key 树的 chevron 由第三方组件用 FA class 渲染，替换成本高。
 
 ## 二、已知限制 / 边界
 
@@ -29,11 +29,10 @@
 - **vite 构建非确定性**：同一源码两次 `npm run build` 产物 hash 可能不同（不影响功能）。
 - **前端运行时依赖**：`axios@0.27`（走 XHR，IE11 无需 fetch polyfill，带 30s 超时）、`CodeMirror 5`（替代 Monaco，IE11 兼容）。
 - **IE11**：通过 `@vitejs/plugin-legacy` 产出 ES5 legacy bundle（`index-legacy-*.js` + `polyfills-legacy-*.js`）+ `url-polyfill` / `resize-observer-polyfill`；但 CSS 变量（连接颜色）与 flex `gap` 在 IE11 不生效（仅影响观感），建议在真实 IE11 冒烟测试（大 key 列表、表格、编辑器）。
-- **产物体积**：现代 bundle ≈ 2.2 MB（gzip ≈ 670 KB），legacy ≈ 2.4 MB（gzip ≈ 682 KB）；其中 Font Awesome 字体（5 种格式）≈ 930 KB。Monaco 已移除（原来占 ~41%）。
+- **产物体积**：现代 bundle ≈ 2.2 MB（gzip ≈ 670 KB），legacy ≈ 2.4 MB（gzip ≈ 682 KB）。Monaco 已移除（原来占 ~41%）；Font Awesome 已子集化，字体从 ≈930 KB 降到 ≈3 KB（woff2）/ 4 KB（woff）/ 6 KB（ttf）。
 
 ## 三、尚未处理的打磨项
 
-- **Font Awesome 未子集化**：项目实际只用 29 个图标（分布在 18 个文件），但整包字体 ≈ 930 KB；可做字体子集化（保留 29 个字形，约 20–40 KB）或改用 Element 图标。
 - `redisui/command.go` 对**裸 JSON `null`** 参数会静默解成空串（前端不发 `null`，无实际影响）。
 - 连接**拖拽排序**会写入 localStorage，但下次刷新被后端连接列表覆盖；嵌入模式下排序不持久（无后端接口）。
 - 搜索模式下 scan 页块（count=10000）与暂停阈值（keysPageSize=500）不齐，首块可一次吐 up to 10000 再暂停。
@@ -57,3 +56,4 @@
 - 集成测试 SCAN/DBSIZE 子测试自包含；新增"禁用连接各端点 404"测试。
 - README 鉴权示例改为 cookie/session（浏览器页面导航无法带 Authorization 头）。
 - 替换 Monaco 为 CodeMirror（IE11 兼容、体积大减）；fetch 换 axios（XHR + 30s 超时）；新增 IE11 legacy 构建。
+- **Font Awesome 字体子集化**：只保留实际使用的 29 个字形，字体 ≈930 KB → woff2 ≈3 KB / woff ≈4 KB / ttf ≈6 KB；模板仍是 `<i class="fa fa-*">`，`currentColor` 继承不变。用 `npm run subset-icons`（`scripts/subset-fontawesome.js`）在增删图标后重新生成。

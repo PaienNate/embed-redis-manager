@@ -9,7 +9,7 @@ if (typeof window !== 'undefined' && !window.ResizeObserver) {
 }
 import Vue from 'vue';
 import ElementUI from 'element-ui';
-import 'font-awesome/css/font-awesome.css';
+import './assets/fontawesome-subset.css';
 import App from './App';
 import i18n from './i18n/i18n';
 import bus from './bus';
