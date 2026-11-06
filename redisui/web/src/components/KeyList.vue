@@ -332,7 +332,7 @@ export default {
         }
 
         // save to file
-        const file = `Dump_${(new Date()).toISOString().substr(0, 10).replaceAll('-', '')}.csv`;
+        const file = `Dump_${(new Date()).toISOString().substr(0, 10).replace(/-/g, '')}.csv`;
         this.$util.createAndDownloadFile(file, lines.join('\n'));
       });
     },

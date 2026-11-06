@@ -142,6 +142,20 @@ cd redisui/web && npm install && npm run build
 cd ../.. && go build ./...
 ```
 
+### Browser support (including IE11)
+
+`npm run build` emits **two** bundles via `@vitejs/plugin-legacy`:
+
+- a modern ES module bundle (`assets/index-*.js`)
+- an IE11-targeted legacy bundle (`assets/index-legacy-*.js` + `assets/polyfills-legacy-*.js`) loaded through `<script nomodule>`
+
+`whatwg-fetch` (fetch), `url-polyfill` (URL, used by SockJS) and a tiny `crypto`
+shim are included for IE11. The editor is CodeMirror 5 (IE11-compatible) rather
+than Monaco, which also keeps the bundle much smaller.
+
+> Note: browsers are detected by the `nomodule` mechanism, so IE11 loads the
+> legacy bundle automatically; no configuration is needed by the host.
+
 ## Testing
 
 ```bash

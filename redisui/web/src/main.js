@@ -1,3 +1,5 @@
+import 'whatwg-fetch';
+import 'url-polyfill';
 import { Buffer } from 'buffer';
 import Vue from 'vue';
 import ElementUI from 'element-ui';

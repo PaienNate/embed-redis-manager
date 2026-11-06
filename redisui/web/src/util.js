@@ -35,7 +35,7 @@ export default {
     return this.bufToHex(buf);
   },
   bufToQuotation(buf) {
-    const str = this.bufToString(buf).replaceAll('"', '\\"');
+    const str = this.bufToString(buf).replace(/"/g, '\\"');
     return `"${str}"`;
   },
   bufToHex(buf) {
