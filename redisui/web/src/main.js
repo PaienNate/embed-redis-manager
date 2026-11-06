@@ -1,6 +1,13 @@
 import 'whatwg-fetch';
 import 'url-polyfill';
+import ResizeObserverPolyfill from 'resize-observer-polyfill';
 import { Buffer } from 'buffer';
+
+// IE11 has no ResizeObserver; the key tree's virtual scroller / Element UI use
+// it when present. Install a polyfill before the app mounts.
+if (typeof window !== 'undefined' && !window.ResizeObserver) {
+  window.ResizeObserver = ResizeObserverPolyfill;
+}
 import Vue from 'vue';
 import ElementUI from 'element-ui';
 import 'font-awesome/css/font-awesome.css';

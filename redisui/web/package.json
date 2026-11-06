@@ -28,6 +28,7 @@
     "protobufjs": "^6.11.4",
     "rawproto": "^0.7.6",
     "regenerator-runtime": "^0.14.1",
+    "resize-observer-polyfill": "^1.5.1",
     "sockjs-client": "^1.6.1",
     "sortablejs": "^1.14.0",
     "url-polyfill": "^1.1.14",
