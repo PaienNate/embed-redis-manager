@@ -116,6 +116,7 @@ const tw = {
     load_more_keys: '載入更多',
     key_name: '鍵名',
     project_home: '專案主頁',
+    acknowledgements: '致謝',
     cluster_faq: '選擇叢集中任一節點設定填入即可，會自動識別其它節點',
     redis_status: 'Redis訊息',
     confirm_flush_db: '確認刪除db{db}中的所有鍵值嗎？',

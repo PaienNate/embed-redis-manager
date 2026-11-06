@@ -39,6 +39,7 @@ client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
 mux := http.NewServeMux()
 err := redisui.Register(mux, redisui.Config{
     Prefix: "/redisui",
+    Version: "myapp-1.2.3", // shown in the UI settings panel
     Connections: []redisui.Connection{
         {ID: "local", Name: "Local Redis", Client: client, Enabled: true},
     },
@@ -58,6 +59,10 @@ http.ListenAndServe(":8080", mux)
 - `Enabled` — when `false`, the connection is hidden from the UI list and its
   command / cluster / stream endpoints return `404`. Set it to toggle a
   connection on or off without removing it.
+
+`Version` (optional) is displayed in the UI settings panel. When empty it falls
+back to the library's `redisui.Version`; set it to surface the host
+application's version instead.
 
 ### 3. Configure the prefix
 

@@ -74,6 +74,29 @@ func TestEmbeddedDistInjectsAPIPrefix(t *testing.T) {
 	if !strings.Contains(body, `apiBase:"/redisui/api"`) {
 		t.Fatalf("apiBase not injected correctly; body=%s", body)
 	}
+	if !strings.Contains(body, `version:"`+Version+`"`) {
+		t.Fatalf("default version not injected; body=%s", body)
+	}
+}
+
+func TestEmbeddedDistInjectsCustomVersion(t *testing.T) {
+	mux := http.NewServeMux()
+	cfg := Config{Prefix: "/r", Version: "9.9.9-test", Connections: []Connection{
+		{ID: "c1", Name: "主缓存", Client: miniredisClient(t), Enabled: true},
+	}}
+	if err := Register(mux, cfg); err != nil {
+		t.Fatalf("Register error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/r/", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `version:"9.9.9-test"`) {
+		t.Fatalf("custom version not injected; body=%s", body)
+	}
 }
 
 func TestStaticAssetServed(t *testing.T) {

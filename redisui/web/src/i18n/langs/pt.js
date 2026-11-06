@@ -116,6 +116,7 @@ const pt = {
     load_more_keys: 'carregar mais',
     key_name: 'Nome da Chave',
     project_home: 'Home do Projeto',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Selecione qualquer nó no cluster para preencher e outros nós serão identificados automaticamente.',
     redis_status: 'Informações do Redis',
     confirm_flush_db: 'Confirme a exclusão de todas as chaves em db {db}?',

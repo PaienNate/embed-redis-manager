@@ -116,6 +116,7 @@ const tr = {
     load_more_keys: 'devamını yükle',
     key_name: 'Anahtar Adı',
     project_home: 'Proje Ana Sayfası',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Doldurmak için, kümedeki herhangi bir düğümü seçin, diğer düğümler otomatik olarak tanımlanacaktır.',
     redis_status: 'Redis Bilgisi',
     confirm_flush_db: 'Db {db} içindeki tüm anahtarları silmek istiyor musunuz?',

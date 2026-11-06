@@ -25,7 +25,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	err := redisui.Register(mux, redisui.Config{
-		Prefix: "/redisui", // defaults to "/redisui" when empty
+		Prefix:  "/redisui", // defaults to "/redisui" when empty
+		Version: "example-1.0.0",
 		Connections: []redisui.Connection{
 			{ID: "local", Name: "Local Redis", Client: client, Enabled: true},
 		},

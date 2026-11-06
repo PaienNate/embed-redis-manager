@@ -98,13 +98,6 @@
               </span>
             </el-form-item>
           </el-col>
-          <el-col :sm="12" :lg="12">
-            <!-- export connections -->
-            <el-form-item :label="$t('message.config_connections')">
-              <el-button icon="el-icon-upload2" @click="exportConnection">{{ $t('message.export') }}</el-button>
-              <el-button icon="el-icon-download" @click="showImportDialog">{{ $t('message.import') }}</el-button>
-            </el-form-item>
-          </el-col>
         </el-row>
       </el-card>
 
@@ -116,37 +109,13 @@
         <div class="current-version">
           <a href="###" @click.stop.prevent="showHotkeys">{{ $t('message.hotkey') }}</a>
           <a href="###" @click.stop.prevent="clearCache">{{ $t('message.clear_cache') }}</a>
-          <a href="###" @click.stop.prevent="checkUpdate">{{ $t('message.check_update') }}</a>
-          <a href="https://github.com/qishibo/AnotherRedisDesktopManager/releases">{{ $t('message.manual_update') }}</a>
-          <a href="https://github.com/qishibo/AnotherRedisDesktopManager/">{{ $t('message.project_home') }}</a>
+        </div>
+        <div class="acknowledgement">
+          {{ $t('message.acknowledgements') }}:
+          <a href="https://github.com/qishibo/AnotherRedisDesktopManager" target="_blank" rel="noopener noreferrer">Another Redis Desktop Manager</a>
         </div>
       </el-card>
     </el-form>
-
-    <!-- import file dialog -->
-    <el-dialog
-      width="400px"
-      :title="$t('message.select_import_file')"
-      :visible.sync="importConnectionVisible"
-      append-to-body>
-
-      <el-upload
-        ref="configUpload"
-        :auto-upload="false"
-        :multiple="false"
-        action=""
-        :limit="1"
-        :on-change="loadConnectionFile"
-        :on-exceed="replaceConnectionFile"
-        drag>
-        <i class="el-icon-upload"></i>
-        <div class="el-upload__text">{{ $t('message.put_file_here') }}</div>
-      </el-upload>
-
-      <div slot="footer" class="dialog-footer">
-        <el-button @click="importConnnection">{{ $t('el.messagebox.confirm') }}</el-button>
-      </div>
-    </el-dialog>
 
     <div slot="footer" class="dialog-footer">
       <el-button @click="visible = false">{{ $t('el.messagebox.cancel') }}</el-button>
@@ -170,9 +139,7 @@ export default {
         keysPageSize: 500,
         showLoadAllKeys: false,
       },
-      importConnectionVisible: false,
-      connectionFileContent: '',
-      appVersion: (new URL(window.location.href)).searchParams.get('version'),
+      appVersion: (window.__REDISUI__ && window.__REDISUI__.version) || '',
       // electronVersion: process.versions.electron,
       allFonts: [],
       loadingFonts: false,
@@ -218,58 +185,6 @@ export default {
     },
     changeZoom() {
       // window/zoom factor is an Electron concept, noop in a browser build
-    },
-    showImportDialog() {
-      this.importConnectionVisible = true;
-    },
-    replaceConnectionFile(files) {
-      const upload = this.$refs.configUpload;
-
-      upload.clearFiles();
-      // handleStart adds the file to the list and triggers on-change to read it
-      upload.handleStart(files[0]);
-    },
-    loadConnectionFile(file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        this.connectionFileContent = event.target.result;
-      };
-      reader.readAsText(file.raw);
-    },
-    importConnnection() {
-      this.importConnectionVisible = false;
-      let config = this.$util.base64Decode(this.connectionFileContent);
-
-      if (!config) {
-        return;
-      }
-
-      config = JSON.parse(config);
-      storage.importConnectionsBundle(config);
-
-      this.$bus.$emit('closeConnection');
-      this.$nextTick(() => {
-        this.$bus.$emit('refreshConnections');
-      });
-
-      this.$message.success({
-        message: this.$t('message.import_success'),
-        duration: 1000,
-      });
-    },
-    exportConnection() {
-      const payload = storage.exportConnectionsBundle();
-      const connections = this.$util.base64Encode(JSON.stringify(payload));
-      this.$util.createAndDownloadFile('connections.ano', connections);
-      this.visible = false;
-    },
-    checkUpdate() {
-      this.$message.info({
-        message: `${this.$t('message.update_checking')}`,
-        duration: 1500,
-      });
-
-      this.$bus.$emit('update-check', true);
     },
     bindGetAllFonts() {
       // system font enumeration is provided by Electron's ipcRenderer in the
@@ -326,6 +241,16 @@ export default {
 .setting-main-dialog .current-version a {
   color: grey;
   font-size: 95%;
+}
+
+.setting-main-dialog .acknowledgement {
+  margin-top: 8px;
+  color: grey;
+  font-size: 95%;
+}
+.setting-main-dialog .acknowledgement a {
+  color: grey;
+  text-decoration: underline;
 }
 
 .setting-main-dialog .setting-card {

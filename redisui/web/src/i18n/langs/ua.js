@@ -116,6 +116,7 @@ const ua = {
     load_more_keys: 'завантажити ще',
     key_name: 'Ім`я ключа',
     project_home: 'Сторінка додатка',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Виберіть будь-який вузол в кластері і заповніть його, він автоматично визначить інші вузли',
     redis_status: 'Інформація Redis',
     confirm_flush_db: 'Ви впевнені, що видалили всі ключі в db {db}?',

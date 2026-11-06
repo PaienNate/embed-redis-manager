@@ -116,6 +116,7 @@ const de = {
     load_more_keys: 'mehr laden',
     key_name: 'Schlüssel-Name',
     project_home: 'Projekt Home',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Wählen Sie einen beliebigen Knoten im Cluster zum Ausfüllen aus, und andere Knoten werden automatisch identifiziert.',
     redis_status: 'Redis Info',
     confirm_flush_db: 'Bestätigen Sie, um alle Schlüssel in db ({db}) zu löschen ?',

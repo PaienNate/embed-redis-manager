@@ -116,6 +116,7 @@ const ko = {
     load_more_keys: '더 불러오기',
     key_name: '키 명',
     project_home: '프로젝트 홈',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: '클러스터의 노드 중 아무거나 하나에 대하여 입력하면 다른 노드들은 자동으로 인식합니다.',
     redis_status: '레디스 정보',
     confirm_flush_db: '{db} 데이터베이스의 모든 키를 삭제하시겠습니까?',

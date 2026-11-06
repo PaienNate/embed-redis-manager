@@ -116,6 +116,7 @@ const en = {
     load_more_keys: 'load more',
     key_name: 'Key Name',
     project_home: 'Project Home',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Select any node in the cluster to fill in, and other nodes will be identified automatically.',
     redis_status: 'Redis Info',
     confirm_flush_db: 'Confirm to delete all the keys in db{db} ?',

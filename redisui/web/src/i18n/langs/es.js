@@ -116,6 +116,7 @@ const es = {
     load_more_keys: 'cargar más',
     key_name: 'Nombre Clave',
     project_home: 'Home Proyecto',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Seleccione cualquier nodo en el clúster para completar, y otros nodos se identificarán automáticamente.',
     redis_status: 'Redis Info',
     confirm_flush_db: '¿Confirmar para eliminar todas las claves en db{db} ?',

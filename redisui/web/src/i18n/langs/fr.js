@@ -116,6 +116,7 @@ const fr = {
     load_more_keys: 'charger plus',
     key_name: 'Nom de la clé',
     project_home: 'Accueil du projet',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Sélectionnez n\'importe quel nœud du cluster à remplir, et les autres nœuds seront identifiés automatiquement.',
     redis_status: 'Statut Redis',
     confirm_flush_db: 'Supprimer toutes les clés dans la base de données {db} ?',

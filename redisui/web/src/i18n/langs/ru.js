@@ -116,6 +116,7 @@ const ru = {
     load_more_keys: 'загрузить ещё',
     key_name: 'Имя ключа',
     project_home: 'Страница приложения',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Выберите любой узел в кластере и заполните его, он автоматически определит другие узлы.',
     redis_status: 'Информация Redis',
     confirm_flush_db: 'Вы уверены, что удалили все ключи в db {db}?',

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -25,10 +26,18 @@ type Connection struct {
 }
 
 // Config configures the embedded Redis UI.
+// Version is the default Redis UI version reported to the frontend when
+// Config.Version is empty. Hosts embedding the UI can override it per Register
+// call to surface their own product version in the settings panel.
+const Version = "0.1.0"
+
+// Config configures a registered Redis UI instance.
 type Config struct {
 	Prefix      string
 	Connections []Connection
 	Middleware  func(http.Handler) http.Handler
+	// Version is shown in the UI settings panel. When empty, Version is used.
+	Version string
 }
 
 // server holds the internal state for a registered UI instance.
@@ -36,6 +45,7 @@ type server struct {
 	conns    map[string]Connection // indexed by Connection.ID
 	order    []string              // connection IDs in config order
 	prefix   string                // normalized mount prefix
+	version  string                // version reported to the UI settings panel
 	frontend fs.FS                 // embedded dist, rooted at web/dist
 	middle   func(http.Handler) http.Handler
 	stream   map[string]http.Handler // connID -> per-connection SockJS handler
@@ -63,9 +73,14 @@ func Register(mux *http.ServeMux, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("redisui: embed frontend sub: %w", err)
 	}
+	version := cfg.Version
+	if version == "" {
+		version = Version
+	}
 	s := &server{
 		conns:    map[string]Connection{},
 		prefix:   prefix,
+		version:  version,
 		frontend: frontend,
 		middle:   cfg.Middleware,
 		stream:   map[string]http.Handler{},
@@ -150,7 +165,7 @@ func (s *server) serveIndexHTML(w http.ResponseWriter) {
 		http.Error(w, "redisui: frontend index not found", http.StatusInternalServerError)
 		return
 	}
-	script := `<script>window.__REDISUI__={apiBase:"` + s.prefix + `/api"}</script>`
+	script := `<script>window.__REDISUI__={apiBase:"` + s.prefix + `/api",version:` + strconv.Quote(s.version) + `}</script>`
 	html := strings.Replace(string(data), "</head>", script+"</head>", 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(html))

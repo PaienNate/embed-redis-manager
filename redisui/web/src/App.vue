@@ -20,15 +20,12 @@
         <Tabs></Tabs>
       </el-main>
     </el-container>
-
-    <UpdateCheck></UpdateCheck>
   </el-container>
 </template>
 
 <script>
 import Aside from '@/Aside';
 import Tabs from '@/components/Tabs';
-import UpdateCheck from '@/components/UpdateCheck';
 import addon from './addon';
 
 export default {
@@ -46,7 +43,7 @@ export default {
     // restore side bar width
     this.restoreSideBarWidth();
   },
-  components: { Aside, Tabs, UpdateCheck },
+  components: { Aside, Tabs },
   methods: {
     bindSideBarDrag() {
       const that = this;
@@ -82,10 +79,6 @@ export default {
     },
   },
   mounted() {
-    setTimeout(() => {
-      this.$bus.$emit('update-check');
-    }, 2000);
-
     this.bindSideBarDrag();
     // addon init setup
     addon.setup();

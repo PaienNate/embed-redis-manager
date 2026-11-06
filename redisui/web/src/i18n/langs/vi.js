@@ -116,6 +116,7 @@ const vi = {
     load_more_keys: 'tải thêm',
     key_name: 'Tên khóa',
     project_home: 'Trang dự án',
+    acknowledgements: 'Acknowledgements',
     cluster_faq: 'Chọn bất kỳ nút nào trong cụm để điền và các nút khác sẽ được xác định tự động.',
     redis_status: 'Thông tin Redis',
     confirm_flush_db: 'Xác nhận xóa tất cả các khóa trong db{db} ?',
