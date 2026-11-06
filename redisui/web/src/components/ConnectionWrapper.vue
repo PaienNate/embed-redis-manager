@@ -70,8 +70,15 @@ export default {
   },
   methods: {
     initShow() {
-      this.$refs.operateItem.initShow();
-      this.$refs.keyList.initShow();
+      // The connection's client resolves synchronously (HttpRedisClient is
+      // always "ready"), so this can run before the submenu's children
+      // (OperateItem/KeyList) are mounted and their $refs exist. Defer to the
+      // next DOM update and guard the refs; otherwise the first open throws and
+      // the initial key scan never happens (key list stays "No Data").
+      this.$nextTick(() => {
+        this.$refs.operateItem && this.$refs.operateItem.initShow();
+        this.$refs.keyList && this.$refs.keyList.initShow();
+      });
     },
     initLastSelectedDb() {
       const db = parseInt(localStorage.getItem(`lastSelectedDb_${this.config.connectionName}`));

@@ -13,14 +13,41 @@ import shortcut from './shortcut';
 window.Buffer = Buffer;
 window.process = window.process || { env: {}, platform: '', versions: {} };
 
-// simple light/dark theme toggle (Electron's native theme bridge is not present)
-window.globalChangeTheme = (theme) => {
-  if (theme === 'dark') {
-    document.body.classList.add('dark-mode');
-  } else {
-    document.body.classList.remove('dark-mode');
-  }
+// ---- Element UI theme ----------------------------------------------------
+// ARDM ships the full Element UI theme prebuilt from element-variables.scss at
+// static/theme/<theme>/index.css and activates it with a <link> (webpack copied
+// `static/` verbatim). Replicate that in the browser. Paths are relative so the
+// stylesheet resolves correctly under any host prefix (e.g. /redisui/).
+const THEME_CSS = {
+  light: 'static/theme/light/index.css',
+  dark: 'static/theme/dark/index.css',
 };
+
+function applyTheme(theme) {
+  const t = theme === 'dark' ? 'dark' : 'light';
+  let link = document.getElementById('theme-link');
+  if (!link) {
+    link = document.createElement('link');
+    link.id = 'theme-link';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+  }
+  link.href = THEME_CSS[t];
+  document.body.classList.toggle('dark-mode', t === 'dark');
+}
+
+// used by the Setting page's theme switch
+window.globalChangeTheme = (theme) => {
+  applyTheme(theme);
+};
+
+// initial theme: stored preference, otherwise follow the OS preference
+(() => {
+  const stored = localStorage.theme;
+  const prefersDark = window.matchMedia
+    && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(stored === 'dark' || stored === 'light' ? stored : (prefersDark ? 'dark' : 'light'));
+})();
 
 // vxe-table
 import 'vxe-table/lib/style.css';
