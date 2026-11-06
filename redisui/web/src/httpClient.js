@@ -15,6 +15,13 @@
 
 import { Buffer } from 'buffer';
 
+// Optional app-level sink for the command-log panel. The app entry registers it
+// (see main.js) so commands are recorded without coupling this module to Vue.
+let commandLogSink = null;
+export function setCommandLogSink(fn) {
+  commandLogSink = fn;
+}
+
 function decodeReply(reply, binary) {
   switch (reply.t) {
     case 's':
@@ -90,6 +97,7 @@ export default class HttpRedisClient {
     const db = (this.condition && this.condition.select) || 0;
 
     let resp;
+    const start = performance.now();
     try {
       resp = await fetch(this.url, {
         method: 'POST',
@@ -116,6 +124,20 @@ export default class HttpRedisClient {
       // Not JSON: transport/protocol problem, not a Redis reply.
       this.emit('error', e);
       throw e;
+    }
+
+    // Record the command for the command-log panel (mirrors ARDM's ioredis
+    // hook). Logged for both success and Redis command errors; a logging
+    // failure must never affect the command result.
+    if (commandLogSink) {
+      try {
+        commandLogSink({
+          time: new Date(),
+          connectionName: this.options && this.options.connectionName,
+          command: { name: String(cmd).toLowerCase(), args: flatArgs.map((a) => String(a)) },
+          cost: performance.now() - start,
+        });
+      } catch (e) { /* ignore logging errors */ }
     }
 
     if (data.error) {

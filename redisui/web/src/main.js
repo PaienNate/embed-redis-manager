@@ -8,6 +8,7 @@ import bus from './bus';
 import util from './util';
 import storage from './storage';
 import shortcut from './shortcut';
+import { setCommandLogSink } from './httpClient';
 
 // browser global shims (some deps/util rely on node globals)
 window.Buffer = Buffer;
@@ -60,6 +61,11 @@ Vue.prototype.$bus = bus;
 Vue.prototype.$util = util;
 Vue.prototype.$storage = storage;
 Vue.prototype.$shortcut = shortcut;
+
+// Forward every redis command to the command-log panel (CommandLog.vue listens
+// for `commandLog` on the bus). Registered here so all HttpRedisClient
+// instances — including CLI duplicates — are covered.
+setCommandLogSink((record) => bus.$emit('commandLog', record));
 
 Vue.use(ElementUI, { size: 'small' });
 Vue.config.productionTip = false;

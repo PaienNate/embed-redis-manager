@@ -360,7 +360,10 @@ export default {
 
 <style type="text/css">
   .connections-wrap {
-    height: calc(100vh - 59px);
+    /* Flex child of .aside-outer-container: fills remaining height, scrolls
+       internally. min-height:0 lets it shrink below content size. */
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     margin-top: 11px;
   }

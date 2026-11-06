@@ -1,10 +1,15 @@
 <template>
   <div class="aside-outer-container">
-    <div>
-      <!-- new connection button -->
+    <div class="aside-header">
       <div class="aside-top-container">
-        <el-button class='aside-setting-btn' type="primary" icon="el-icon-time" @click="$refs.commandLogDialog.show()" :title='$t("message.command_log")+" Ctrl+g"' plain></el-button>
-        <el-button class='aside-setting-btn' type="primary" icon="el-icon-setting" @click="$refs.settingDialog.show()" :title='$t("message.settings")+" Ctrl+,"' plain></el-button>
+        <!-- connection / page status -->
+        <span class="conn-status" :class="connStatus" :title="statusText">
+          <i class="conn-status-dot"></i>{{ statusText }}
+        </span>
+        <div class="aside-top-actions">
+          <el-button class='aside-setting-btn' type="primary" icon="el-icon-time" @click="$refs.commandLogDialog.show()" :title='$t("message.command_log")+" Ctrl+g"' plain></el-button>
+          <el-button class='aside-setting-btn' type="primary" icon="el-icon-setting" @click="$refs.settingDialog.show()" :title='$t("message.settings")+" Ctrl+,"' plain></el-button>
+        </div>
       </div>
 
       <!-- user settings -->
@@ -32,12 +37,68 @@ import CustomFormatter from '@/components/CustomFormatter';
 
 export default {
   data() {
-    return {};
+    return {
+      connStatus: 'checking', // checking | connected | disconnected
+      statusConnID: '',
+      statusTimer: null,
+    };
   },
   components: {
     Connections, Setting, CommandLog, HotKeys, CustomFormatter,
   },
+  computed: {
+    statusText() {
+      if (this.connStatus === 'connected') {
+        return this.$t('message.status_connected');
+      }
+      if (this.connStatus === 'disconnected') {
+        return this.$t('message.status_disconnected');
+      }
+      return this.$t('message.status_checking');
+    },
+  },
   methods: {
+    _apiBase() {
+      const base = (typeof window !== 'undefined' && window.__REDISUI__ && window.__REDISUI__.apiBase) || '/api';
+      return String(base).replace(/\/+$/, '');
+    },
+    async _pickConnID() {
+      try {
+        const resp = await fetch(`${this._apiBase()}/connections`);
+        if (!resp.ok) {
+          return null;
+        }
+        const list = await resp.json();
+        const conn = (list || []).find((c) => c.enabled !== false);
+        return conn ? conn.id : null;
+      } catch (e) {
+        return null;
+      }
+    },
+    async checkStatus() {
+      const id = this.statusConnID || await this._pickConnID();
+      if (!id) {
+        this.connStatus = 'disconnected';
+        return;
+      }
+      this.statusConnID = id;
+      try {
+        const resp = await fetch(`${this._apiBase()}/redis/${id}/command`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cmd: 'ping', args: [] }),
+        });
+        const data = await resp.json();
+        this.connStatus = (resp.ok && !data.error) ? 'connected' : 'disconnected';
+      } catch (e) {
+        this.connStatus = 'disconnected';
+        this.statusConnID = ''; // re-resolve the connection next round
+      }
+    },
+    startStatusPolling() {
+      this.checkStatus();
+      this.statusTimer = setInterval(() => this.checkStatus(), 10000);
+    },
     initShortcut() {
       // settings
       this.$shortcut.bind('ctrl+,', () => {
@@ -57,32 +118,74 @@ export default {
   },
   mounted() {
     this.initShortcut();
+    this.startStatusPolling();
+  },
+  beforeDestroy() {
+    clearInterval(this.statusTimer);
   },
 };
 </script>
 
 <style type="text/css">
-  .aside-top-container {
-    margin-right: 8px;
-    /* The embedded build removed the (non-floated) "New Connection" button,
-       leaving only float:right buttons here. Without containing those floats
-       this container collapses to 0 height and the next sibling
-       (.connections-wrap, an overflow:auto BFC) shrinks to avoid the float —
-       collapsing the whole connection/key list to a narrow column. */
-    display: flow-root;
-  }
-  .aside-top-container .aside-new-connection-container {
-    margin-right: 109px;
-  }
-  .aside-new-connection-container .aside-new-connection-btn {
-    width: 100%;
+  /* Whole aside as a flex column so the connection list fills the remaining
+     height without fixed 100vh calcs or float/overflow paint artifacts. */
+  .aside-outer-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     overflow: hidden;
-    text-overflow: ellipsis;
+  }
+  .aside-header {
+    flex: 0 0 auto;
+  }
+  .aside-top-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 33px;
+    margin: 0 8px;
+  }
+  .aside-top-actions {
+    display: flex;
+    align-items: center;
   }
   .aside-top-container .aside-setting-btn {
-    float: right;
     width: 44px;
-    margin-right: 5px;
+    margin-left: 5px;
+    margin-right: 0;
+  }
+
+  .conn-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    line-height: 1;
+    color: #909399;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .conn-status .conn-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #c0c4cc;
+    flex: 0 0 auto;
+  }
+  .conn-status.connected {
+    color: #67c23a;
+  }
+  .conn-status.connected .conn-status-dot {
+    background: #67c23a;
+  }
+  .conn-status.disconnected {
+    color: #f56c6c;
+  }
+  .conn-status.disconnected .conn-status-dot {
+    background: #f56c6c;
+  }
+  .conn-status.checking .conn-status-dot {
+    background: #e6a23c;
   }
 
   .dark-mode .aside-top-container .el-button--info {

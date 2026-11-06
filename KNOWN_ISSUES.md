@@ -19,7 +19,7 @@
 - **db>0 时的专用 client**：为规避 go-redis 连接池 SELECT 不粘连，db≠0 的命令在**每 db 懒创建+缓存的专用 client** 上执行。代价：该专用 client **不继承宿主的 `AddHook` 钩子**；哨兵故障转移后其地址可能钉死在初始解析结果。（README §5 已记。）
 - **会话态命令**（`AUTH` / `CLIENT SETNAME` 等）仍走宿主注入的共享连接池，可能影响池内其它连接。
 - **CSRF**：鉴权归宿主；命令端点强制 `application/json` 请求体，天然触发 CORS 预检，已挡掉简单跨站 POST。
-- **命令日志侧栏为空**：原 ARDM 的 ioredis `commandLog` 事件监控在移植时未重新接线，`CommandLog` 侧栏打开是空表。
+- **命令日志**：已重新接线——`HttpRedisClient` 通过 `setCommandLogSink` 把每条命令（含 CLI）转发到 `CommandLog`（`ping` 被过滤）。
 - **无自动化 CI**：真实 Redis 的 stream/pub-sub 集成测试在无 Redis 环境下静默 SKIP（用 `REDISUI_TEST_REDIS_ADDR` 指定）。建议 CI 带 Redis service 跑全量。
 - **前端无组件级单测**：`vitest` 只覆盖 `HttpRedisClient`/`stream.js` 的协议映射；`DeleteBatch`/`CliTab` 等组件行为靠走查。
 - **vite 构建非确定性**：同一源码两次 `npm run build` 产物 hash 可能不同（不影响功能）。
