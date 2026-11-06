@@ -1,6 +1,7 @@
 package redisui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,50 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+
+	"embedRedisClient/redisui/goredisv9"
 )
 
-func miniredisClient(t *testing.T) redis.UniversalClient {
+// testRedis exposes both faces the tests need: the raw go-redis client for
+// seeding typed commands (Set/HSet/...) and the redisui.Client adapter for
+// constructing a Connection. The explicit Client methods override the
+// embedded *redis.Client's same-named methods, which would otherwise be
+// ambiguous (and keep testRedis from satisfying Client).
+type testRedis struct {
+	*redis.Client
+	ui Client
+}
+
+func newTestRedis(raw *redis.Client) *testRedis {
+	return &testRedis{Client: raw, ui: goredisv9.New(raw)}
+}
+
+func (c *testRedis) Do(ctx context.Context, args ...interface{}) Command {
+	return c.ui.Do(ctx, args...)
+}
+func (c *testRedis) Subscribe(ctx context.Context, channels ...string) Subscription {
+	return c.ui.Subscribe(ctx, channels...)
+}
+func (c *testRedis) PSubscribe(ctx context.Context, patterns ...string) Subscription {
+	return c.ui.PSubscribe(ctx, patterns...)
+}
+func (c *testRedis) Kind() Kind                                       { return c.ui.Kind() }
+func (c *testRedis) HostPort() (string, string)                       { return c.ui.HostPort() }
+func (c *testRedis) WithDB(db int) (Client, error)                    { return c.ui.WithDB(db) }
+func (c *testRedis) ClusterNodes(ctx context.Context) (string, error) { return c.ui.ClusterNodes(ctx) }
+func (c *testRedis) Monitor(ctx context.Context) (Monitor, error)     { return c.ui.Monitor(ctx) }
+
+// miniredisRawClient returns the unwrapped go-redis client. Tests that need to
+// inspect concrete client types (for example the unsupported-client wrapper)
+// use it together with goredisv9.New.
+func miniredisRawClient(t *testing.T) *redis.Client {
 	t.Helper()
 	m := miniredis.RunT(t)
 	return redis.NewClient(&redis.Options{Addr: m.Addr()})
+}
+
+func miniredisClient(t *testing.T) *testRedis {
+	return newTestRedis(miniredisRawClient(t))
 }
 
 func TestRegisterAddsRoutesToMux(t *testing.T) {

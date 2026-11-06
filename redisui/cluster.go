@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // clusterNode is one node from a cluster connection's CLUSTER NODES output.
@@ -36,9 +34,9 @@ type clusterNodesResponse struct {
 }
 
 // handleClusterNodes serves GET {prefix}/api/redis/{connID}/cluster/nodes. For
-// a *redis.ClusterClient it returns the parsed CLUSTER NODES list; any other
-// client type (single node, ring, sentinel) returns an empty node list rather
-// than an error, so the frontend can treat "no nodes" as "not a cluster".
+// a cluster client it returns the parsed CLUSTER NODES list; any other client
+// type (single node, ring, sentinel) returns an empty node list rather than an
+// error, so the frontend can treat "no nodes" as "not a cluster".
 func (s *server) handleClusterNodes(w http.ResponseWriter, r *http.Request) {
 	conn, ok := s.conns[r.PathValue("connID")]
 	if !ok || !conn.Enabled {
@@ -46,13 +44,7 @@ func (s *server) handleClusterNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cluster, ok := conn.Client.(*redis.ClusterClient)
-	if !ok {
-		writeClusterNodes(w, nil)
-		return
-	}
-
-	raw, err := cluster.ClusterNodes(r.Context()).Result()
+	raw, err := conn.Client.ClusterNodes(r.Context())
 	if err != nil {
 		msg := err.Error()
 		w.Header().Set("Content-Type", "application/json")

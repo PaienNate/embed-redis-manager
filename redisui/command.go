@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // maxCommandBodyBytes caps the request body accepted by the generic command
@@ -116,7 +114,7 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 	cmd := run(r.Context(), args...)
 	if err := cmd.Err(); err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, ErrNil) {
 			// A nil reply (e.g. GET of a missing key) is not an error.
 			writeCommandResponse(w, nil, &typedReply{t: "n"})
 			return
@@ -131,7 +129,7 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 // commandRunner executes one command and returns its reply.
-type commandRunner func(ctx context.Context, args ...interface{}) *redis.Cmd
+type commandRunner func(ctx context.Context, args ...interface{}) Command
 
 // commandExecutor decides which client a command request runs on.
 //
@@ -153,7 +151,7 @@ type commandRunner func(ctx context.Context, args ...interface{}) *redis.Cmd
 //     request instead of running it against the wrong db.
 func (s *server) commandExecutor(conn Connection, req commandRequest) (commandRunner, error) {
 	// cluster: single db; SELECT is rejected by the server itself.
-	if _, isCluster := conn.Client.(*redis.ClusterClient); isCluster {
+	if conn.Client.Kind() == KindCluster {
 		return conn.Client.Do, nil
 	}
 
@@ -170,19 +168,26 @@ func (s *server) commandExecutor(conn Connection, req commandRequest) (commandRu
 		desiredDB = selectTarget
 	}
 
-	pc, isPlain := conn.Client.(*redis.Client)
-	if !isPlain {
+	if conn.Client.Kind() != KindSingle {
 		if desiredDB > 0 {
-			return nil, fmt.Errorf("db %d requested but this client type cannot scope a db to one connection", desiredDB)
+			return nil, fmt.Errorf("%w: db %d", ErrDBUnsupported, desiredDB)
 		}
 		return conn.Client.Do, nil
 	}
 
 	if strings.EqualFold(req.Cmd, "SELECT") && hasSelectTarget {
-		return s.dbClientFor(conn, pc, desiredDB).Do, nil
+		c, err := s.dbClientFor(conn, desiredDB)
+		if err != nil {
+			return nil, err
+		}
+		return c.Do, nil
 	}
 	if req.DB > 0 {
-		return s.dbClientFor(conn, pc, req.DB).Do, nil
+		c, err := s.dbClientFor(conn, req.DB)
+		if err != nil {
+			return nil, err
+		}
+		return c.Do, nil
 	}
 	return conn.Client.Do, nil
 }
@@ -244,40 +249,34 @@ func selectTargetDB(args []json.RawMessage) (int, bool) {
 }
 
 // dbClientFor returns a cached client whose connection pool is pinned to the
-// given db. It is built from a copy of the injected client's options with
-// DB overridden (redis.NewClient clones what it is given, so the injected
-// client's live options are never mutated) — the pool is fully independent:
-// no shared options, no shared session state, no data race with the injected
-// client's own connection setup. Host-registered hooks (AddHook) do not carry
-// over to these clients; db 0 keeps using the injected client, so hooks apply
-// to the default path. The clients live as long as the server (connections
-// are host-owned and never unregistered), which matches the process lifetime
-// of the embedded UI.
-func (s *server) dbClientFor(conn Connection, pc *redis.Client, db int) *redis.Client {
+// given db. The adapter builds it from a copy of the injected client's options
+// (the injected client's live options are never mutated), so the pool is fully
+// independent: no shared options, no shared session state, no data race with
+// the injected client's own connection setup. Host-registered hooks (AddHook)
+// do not carry over to these clients; db 0 keeps using the injected client, so
+// hooks apply to the default path. The clients live as long as the server
+// (connections are host-owned and never unregistered), which matches the
+// process lifetime of the embedded UI.
+func (s *server) dbClientFor(conn Connection, db int) (Client, error) {
 	s.dbMu.Lock()
 	defer s.dbMu.Unlock()
 	if s.dbClients == nil {
-		s.dbClients = map[string]map[int]*redis.Client{}
+		s.dbClients = map[string]map[int]Client{}
 	}
 	byDB := s.dbClients[conn.ID]
 	if byDB == nil {
-		byDB = map[int]*redis.Client{}
+		byDB = map[int]Client{}
 		s.dbClients[conn.ID] = byDB
 	}
 	if c := byDB[db]; c != nil {
-		return c
+		return c, nil
 	}
-	opts := *pc.Options() // shallow copy; NewClient deep-clones it
-	opts.DB = db
-	// The shallow copy still points at the host's *live* MaintNotificationsConfig;
-	// NewClient's clone() dereferences that pointer, racing with the host's
-	// initConn writing Mode under its own optLock (go-redis v9.23 gives a
-	// derived Conn its own lock over the shared Options). Drop the pointer —
-	// Options.init() re-applies the defaults to the fresh copy (nil-safe).
-	opts.MaintNotificationsConfig = nil
-	c := redis.NewClient(&opts)
+	c, err := conn.Client.WithDB(db)
+	if err != nil {
+		return nil, err
+	}
 	byDB[db] = c
-	return c
+	return c, nil
 }
 
 // decodeCommandArg turns one raw JSON argument into a Go value safe to pass to

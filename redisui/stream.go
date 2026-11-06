@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/igm/sockjs-go/sockjs"
-	"github.com/redis/go-redis/v9"
 )
 
 // This file implements the SockJS streaming endpoint that pushes server-side
@@ -68,7 +68,7 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 // on a dedicated goroutine, maintains the current subscription, and forwards
 // every Redis event to the session. When the session closes (client disconnects
 // or Recv/Send errors), the active subscription is torn down.
-func (s *server) runStream(client redis.UniversalClient, sess sockjs.Session) {
+func (s *server) runStream(client Client, sess sockjs.Session) {
 	ctrl := make(chan streamControl)
 	// done lets the Recv goroutine exit instead of blocking forever on `ctrl <-`
 	// if runStream returns (e.g. Send failed) while the goroutine is between
@@ -141,7 +141,7 @@ func (s *server) runStream(client redis.UniversalClient, sess sockjs.Session) {
 // its event channel plus a teardown function. On an invalid request it returns
 // a nil channel, a nil stop, and an error (the caller surfaces the error to the
 // frontend and keeps the session idle).
-func startSubscription(client redis.UniversalClient, ctrl streamControl) (<-chan streamEvent, func(), error) {
+func startSubscription(client Client, ctrl streamControl) (<-chan streamEvent, func(), error) {
 	switch ctrl.Type {
 	case "monitor":
 		return startMonitor(client)
@@ -163,55 +163,45 @@ func startSubscription(client redis.UniversalClient, ctrl streamControl) (<-chan
 	}
 }
 
-// startMonitor starts a MONITOR on a dedicated connection and streams raw
-// MONITOR lines to the returned event channel.
-//
-// MONITOR takes over the connection it runs on, so it may not be issued on a
-// pooled, shared connection (go-redis would otherwise reuse that connection for
-// unrelated commands and corrupt the stream). We therefore borrow a dedicated
-// connection from the client via EphemeralConn() (which DISCARDs the
-// connection on close rather than returning a monitor-poisoned connection to
-// the pool). This requires a concrete single-node *redis.Client; cluster/ring
-// clients (which cannot hand out a dedicated connection) return an error.
-func startMonitor(client redis.UniversalClient) (<-chan streamEvent, func(), error) {
-	rc, ok := client.(*redis.Client)
-	if !ok {
-		return nil, nil, fmt.Errorf(
-			"redisui: MONITOR requires a single-node redis client; %T is not supported", client)
+// startMonitor starts a MONITOR feed and streams raw lines to the returned
+// event channel. The adapter owns the dedicated connection: MONITOR takes over
+// the connection it runs on, so it must never land on a host-pooled connection.
+func startMonitor(client Client) (<-chan streamEvent, func(), error) {
+	if client == nil {
+		return nil, nil, fmt.Errorf("redisui: MONITOR requires a single-node redis client")
+	}
+	mon, err := client.Monitor(context.Background())
+	if err != nil {
+		return nil, nil, err
 	}
 
-	conn := rc.EphemeralConn()
-	ch := make(chan string, 256)
-	ctx, cancel := context.WithCancel(context.Background())
-	mn := conn.Monitor(ctx, ch)
-	mn.Start()
-
 	out := make(chan streamEvent, 256)
+	done := make(chan struct{})
 	go func() {
 		defer close(out)
 		for {
 			select {
-			case <-ctx.Done():
+			case <-done:
 				return
-			case line, ok := <-ch:
+			case line, ok := <-mon.Lines():
 				if !ok {
 					return
 				}
-				out <- streamEvent{Type: "monitor", Line: line}
+				select {
+				case out <- streamEvent{Type: "monitor", Line: line}:
+				case <-done:
+					return
+				}
 			}
 		}
 	}()
 
+	var once sync.Once
 	stop := func() {
-		cancel()
-		// NOTE: we deliberately do NOT call mn.Stop() here. go-redis's
-		// MonitorCmd.readMonitor holds the command mutex while blocked on
-		// rd.Peek() waiting for the next line, so when the monitor is idle
-		// Stop() would deadlock trying to take that mutex. Closing the dedicated
-		// connection unblocks the pending Peek (readMonitor then returns and the
-		// background read goroutine exits), which is the reliable way to stop an
-		// idle MONITOR.
-		_ = conn.Close() // EphemeralConn discards the underlying conn.
+		once.Do(func() {
+			close(done)
+			mon.Stop()
+		})
 	}
 	return out, stop, nil
 }
@@ -220,33 +210,39 @@ func startMonitor(client redis.UniversalClient) (<-chan streamEvent, func(), err
 // on the client and streams each received message to the returned event channel.
 // The Redis subscription is created from the injected UniversalClient, which
 // exposes Subscribe/PSubscribe regardless of the concrete client type.
-func startPubSub(client redis.UniversalClient, keys []string, pattern bool) (<-chan streamEvent, func(), error) {
+func startPubSub(client Client, keys []string, pattern bool) (<-chan streamEvent, func(), error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	var ps *redis.PubSub
+	var sub Subscription
 	if pattern {
-		ps = client.PSubscribe(ctx, keys...)
+		sub = client.PSubscribe(ctx, keys...)
 	} else {
-		ps = client.Subscribe(ctx, keys...)
+		sub = client.Subscribe(ctx, keys...)
 	}
 
 	out := make(chan streamEvent, 256)
 	go func() {
 		defer close(out)
-		defer ps.Close()
-		ch := ps.Channel()
+		defer sub.Close()
+		msgs := sub.Messages()
 		for {
+			var ev streamEvent
 			select {
 			case <-ctx.Done():
 				return
-			case m, ok := <-ch:
+			case m, ok := <-msgs:
 				if !ok {
 					return
 				}
 				if pattern {
-					out <- streamEvent{Type: "pmessage", Pattern: m.Pattern, Channel: m.Channel, Message: m.Payload}
+					ev = streamEvent{Type: "pmessage", Pattern: m.Pattern, Channel: m.Channel, Message: m.Payload}
 				} else {
-					out <- streamEvent{Type: "message", Channel: m.Channel, Message: m.Payload}
+					ev = streamEvent{Type: "message", Channel: m.Channel, Message: m.Payload}
 				}
+			}
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()

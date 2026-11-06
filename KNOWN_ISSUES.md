@@ -18,10 +18,11 @@
 
 ## 二、已知限制 / 边界
 
-- **MONITOR 仅支持单节点 `*redis.Client`**：`*redis.ClusterClient` / `*redis.Ring` 不支持 MONITOR，会返回错误事件（pub/sub 订阅仍可用）。
+- **MONITOR 仅由 v9 适配器提供，且仅支持单节点 `*redis.Client`**：`*redis.ClusterClient` / `*redis.Ring` 会返回 `ErrMonitorUnsupported`（pub/sub 订阅仍可用）。**v8 适配器没有 MONITOR**（go-redis v8 无该命令），Monitor 页同样返回不支持。
+- **Go 版本与 go-redis 版本绑定**：库本体要求 **Go 1.23+**；v9 适配器钉 `go-redis v9.18.x`（v9.19+ 要 Go 1.24，v9.23 要 Go 1.26）。宿主如果自行升级 go-redis，MVS 会选高版本，Go 下限随之提高；v8 适配器用 `github.com/go-redis/redis/v8 v8.11.5`。
 - **危险命令未拦截**：`POST /command` 可执行 `FLUSHALL`/`DEBUG`/`SHUTDOWN` 等。安全边界是宿主鉴权；如需只读，宿主在 Middleware 里过滤，或后续考虑加 `Config.ReadOnly`/命令白名单。
 - **阻塞命令（`BLPOP key 0` 等）**：走 HTTP 端点会在 go-redis 读超时后报错；如需阻塞命令请用其它通道。
-- **db>0 时的专用 client**：为规避 go-redis 连接池 SELECT 不粘连，db≠0 的命令在**每 db 懒创建+缓存的专用 client** 上执行。它通过 `Options()` 继承了连接的 `Addr/Network/Dialer/TLS/Username/Password/Protocol/PoolSize/超时` 等；但 `Options()` 里没有 **hooks**（go-redis 无读取已注册 hook 的公开接口）、也没有 **哨兵/故障转移拓扑**（`FailoverOptions` 不可从 client 还原），所以该专用 client **不继承宿主的 `AddHook`**、failover 后地址可能钉死。负数的 `SELECT` 不再创建/缓存专用 client（交给服务器拒绝）。如需保留 hooks/failover，建议宿主**按 DB 分别注入 client**（多个 Connection），或后续加可选的 `Connection.NewDBClient func(db int) redis.UniversalClient` 工厂。
+- **db>0 时的专用 client**：为规避 go-redis 连接池 SELECT 不粘连，db≠0 的命令在**每 db 懒创建+缓存的专用 client** 上执行（由 v8/v9 适配器从 `Options()` 克隆）。它通过 `Options()` 继承了连接的 `Addr/Network/Dialer/TLS/Username/Password/Protocol/PoolSize/超时` 等；但 `Options()` 里没有 **hooks**（go-redis 无读取已注册 hook 的公开接口）、也没有 **哨兵/故障转移拓扑**（`FailoverOptions` 不可从 client 还原），所以该专用 client **不继承宿主的 `AddHook`**、failover 后地址可能钉死。负数的 `SELECT` 不再创建/缓存专用 client（交给服务器拒绝）。v9 适配器给派生 client 设置独立的 `MaintNotificationsConfig{Mode: disabled}`，既避免共享宿主配置指针的竞态，也避免每个派生 client 重复注册全局维护通知 handler。如需保留 hooks/failover，建议宿主**按 DB 分别注入 client**（多个 Connection）。
 - **会话态命令**（`AUTH` / `CLIENT SETNAME` 等）仍走宿主注入的共享连接池，可能影响池内其它连接。
 - **CSRF**：鉴权归宿主；命令端点强制 `application/json` 请求体，天然触发 CORS 预检，已挡掉简单跨站 POST。
 - **无自动化 CI**：真实 Redis 的 stream/pub-sub 集成测试在无 Redis 环境下静默 SKIP（用 `REDISUI_TEST_REDIS_ADDR` 指定）。建议 CI 带 Redis service 跑全量。
@@ -42,6 +43,8 @@
 
 ## 附：近期已修复（从清单移除）
 
+- 核心不再直接依赖 go-redis：新增叶子接口包 `redisui/redisclient`、v9 适配器 `redisui/goredisv9`、v8 适配器 `redisui/goredisv8`；`go.mod` 降到 `go 1.23.0` + go-redis v9.18.0，`Connection.Client` 类型改为 `redisui.Client`（宿主用 `goredisv9.New` / `goredisv8.New` 包一层）。
+- v9 MONITOR 改为“专用 client + 粘性连接”，不再依赖 v9.23 的 `EphemeralConn`；同时禁用派生 client 的维护通知，修复 `-race` 下 `bufio.Reader` 的竞态。
 - 命令日志已接线（`setCommandLogSink` 转发每条命令到 `CommandLog`，ping 过滤）。
 - 版本号由后端 `Config.Version` 注入，设置页显示；移除检查更新/手动下载，增加致谢链接。
 - 连接 tooltip 的 host/port 由后端从注入 client 的 `Options().Addr` 派生（standalone/failover 用 `Addr`，cluster/ring 取首个地址），不再显示 `Host: undefined`。

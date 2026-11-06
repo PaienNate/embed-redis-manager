@@ -4,7 +4,8 @@
 
 ## 特性
 
-- **注入式连接**：宿主注入 `*redis.Client` / `*redis.ClusterClient`，库不建连接。
+- **注入式连接**：宿主注入已初始化的 go-redis client（v9 用 `goredisv9.New`、v8 用 `goredisv8.New`），库不建连接。
+- **双版本适配**：核心 `redisui` 不直接依赖 go-redis；v8 / v9 适配器可共存，库本体要求 **Go 1.23+**。
 - **同源 SPA**：前端构建产物用 `go:embed` 打进二进制，挂到 `{prefix}/`，API 在 `{prefix}/api`。
 - **功能齐全**：key 浏览/搜索、string/hash/list/set/zset 查看编辑、CLI、stream/rejson/TS/vector、集群节点、监控、导入导出。
 - **流式**：MONITOR / pub-sub 走 SockJS（自动 WebSocket→XHR-streaming→XHR-polling 降级），适配受限网络。
@@ -22,6 +23,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"embedRedisClient/redisui"
+	"embedRedisClient/redisui/goredisv9"
 )
 
 func main() {
@@ -32,7 +34,7 @@ func main() {
 		Prefix:  "/redisui",          // 默认 /redisui
 		Version: "myapp-1.0.0",       // 设置页显示的版本号
 		Connections: []redisui.Connection{
-			{ID: "local", Name: "Local Redis", Client: client, Enabled: true},
+			{ID: "local", Name: "Local Redis", Client: goredisv9.New(client), Enabled: true},
 		},
 		// Middleware: 你的鉴权中间件（可选）
 	})
@@ -44,6 +46,23 @@ func main() {
 }
 ```
 
+## Go 版本与 go-redis 适配
+
+- 库本体要求 **Go 1.23+**；核心 `redisui` 不再直接依赖 go-redis，版本差异全部收敛在适配器里。
+- **v9 适配器**（`redisui/goredisv9`）：依赖 `github.com/redis/go-redis/v9 v9.18.x`。注意 v9.19+ 要求 Go 1.24，v9.23 要求 Go 1.26；宿主如果自行升级 go-redis，MVS 会选高版本，Go 下限也随之提高。
+- **v8 适配器**（`redisui/goredisv8`）：依赖 `github.com/go-redis/redis/v8 v8.11.5`。v8 没有 MONITOR 命令，Monitor 页会明确返回“不支持”；命令、订阅、集群节点、多 db 均正常。
+- v8 和 v9 是不同 import path，**同一个进程可以同时注册两种连接**。
+
+```go
+import (
+	v8 "github.com/go-redis/redis/v8"
+	"embedRedisClient/redisui/goredisv8"
+)
+
+c := v8.NewClient(&v8.Options{Addr: "localhost:6379"})
+// Connections: []redisui.Connection{{ID: "v8", Client: goredisv8.New(c), Enabled: true}}
+```
+
 ## 构建与测试
 
 ```bash
@@ -52,9 +71,10 @@ cd redisui/web && npm install && npm run build
 # 图标子集（增删 fa-* 图标后）
 cd redisui/web && npm run subset-icons
 
-# Go
+# Go（Go 1.23+；go.mod 已钉 go-redis v9.18.0 + v8.11.5）
 go build ./...
-go test ./...          # 使用 miniredis，无需真实 Redis
+go test ./...          # 使用 miniredis，无需真实 Redis；含 v8/v9 adapter 测试
+gofmt -l redisui/ example/
 cd redisui/web && npx vitest run
 ```
 

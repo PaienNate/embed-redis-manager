@@ -10,6 +10,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+
+	"embedRedisClient/redisui/goredisv9"
 )
 
 // The frontend (httpClient.js) encodes every command argument as a typed
@@ -47,7 +49,7 @@ func TestCommandDBFieldIsolatesDatabases(t *testing.T) {
 // db-pinned client, leaving the injected pool untouched.
 func TestCommandSelectDoesNotLeakToPool(t *testing.T) {
 	m := miniredis.RunT(t)
-	c := redis.NewClient(&redis.Options{Addr: m.Addr(), PoolSize: 1, MinIdleConns: 1})
+	c := newTestRedis(redis.NewClient(&redis.Options{Addr: m.Addr(), PoolSize: 1, MinIdleConns: 1}))
 	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
 
 	rec := doCommand(t, mux, "c1", `{"cmd":"select","args":[{"t":"s","v":"1"}],"db":0}`)
@@ -73,7 +75,7 @@ func TestCommandTypedSelectRoutesToTargetDBClient(t *testing.T) {
 	m := miniredis.RunT(t)
 	// A single pooled connection makes the routing deterministic: if SELECT
 	// leaked into the injected pool, every later command must reuse it.
-	c := redis.NewClient(&redis.Options{Addr: m.Addr(), PoolSize: 1, MinIdleConns: 1})
+	c := newTestRedis(redis.NewClient(&redis.Options{Addr: m.Addr(), PoolSize: 1, MinIdleConns: 1}))
 	mux := commandServer(t, Connection{ID: "c1", Name: "c1", Client: c, Enabled: true})
 
 	rec := doCommand(t, mux, "c1", `{"cmd":"select","args":[{"t":"s","v":"1"}],"db":0}`)
@@ -181,7 +183,7 @@ type universalWrapper struct {
 
 func TestCommandDBUnsupportedClientTypeRejected(t *testing.T) {
 	mux := commandServer(t, Connection{
-		ID: "c1", Name: "c1", Client: universalWrapper{miniredisClient(t)}, Enabled: true,
+		ID: "c1", Name: "c1", Client: goredisv9.New(universalWrapper{miniredisRawClient(t)}), Enabled: true,
 	})
 
 	rec := doCommand(t, mux, "c1", `{"cmd":"get","args":[{"t":"s","v":"k"}],"db":3}`)

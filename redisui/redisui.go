@@ -8,13 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // Connection describes a single Redis connection exposed through the UI.
@@ -22,7 +19,7 @@ import (
 type Connection struct {
 	ID      string
 	Name    string
-	Client  redis.UniversalClient
+	Client  Client
 	Enabled bool
 }
 
@@ -54,7 +51,7 @@ type server struct {
 	// dbClients caches the db-pinned clients behind dbClientFor:
 	// connID -> db -> dedicated client. Guarded by dbMu.
 	dbMu      sync.Mutex
-	dbClients map[string]map[int]*redis.Client
+	dbClients map[string]map[int]Client
 }
 
 // Register mounts the Redis UI handlers under cfg.Prefix on mux. Prefix
@@ -202,35 +199,6 @@ type connectionDTO struct {
 	Port string `json:"port,omitempty"`
 }
 
-// clientHostPort extracts a display host/port from the injected client. It uses
-// the client's own Options(), so it works for standalone/failover (Addr), and
-// the first address for cluster/ring.
-func clientHostPort(c redis.UniversalClient) (host, port string) {
-	var addr string
-	switch v := c.(type) {
-	case *redis.Client:
-		addr = v.Options().Addr
-	case *redis.ClusterClient:
-		if addrs := v.Options().Addrs; len(addrs) > 0 {
-			addr = addrs[0]
-		}
-	case *redis.Ring:
-		// map iteration is random; choose deterministically.
-		for _, a := range v.Options().Addrs {
-			if addr == "" || a < addr {
-				addr = a
-			}
-		}
-	}
-	if addr == "" {
-		return "", ""
-	}
-	if h, p, err := net.SplitHostPort(addr); err == nil {
-		return h, p
-	}
-	return addr, ""
-}
-
 func (s *server) handleConnections(w http.ResponseWriter, _ *http.Request) {
 	out := make([]connectionDTO, 0, len(s.conns))
 	for _, id := range s.order {
@@ -238,7 +206,7 @@ func (s *server) handleConnections(w http.ResponseWriter, _ *http.Request) {
 		if !c.Enabled {
 			continue
 		}
-		host, port := clientHostPort(c.Client)
+		host, port := c.Client.HostPort()
 		out = append(out, connectionDTO{ID: c.ID, Name: c.Name, Enabled: true, Host: host, Port: port})
 	}
 	w.Header().Set("Content-Type", "application/json")

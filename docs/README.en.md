@@ -13,6 +13,9 @@ host. Your own program exposes the UI at a prefix you choose.
 ## Library layout
 
 - `redisui/` — the embeddable Go package (`import "embedRedisClient/redisui"`).
+- `redisui/redisclient/` — the leaf interface package (`Client`, `Command`, `Subscription`, `Monitor`); the core and the adapters both depend on it.
+- `redisui/goredisv9/` — adapter for `github.com/redis/go-redis/v9` (pinned to v9.18.x).
+- `redisui/goredisv8/` — adapter for `github.com/go-redis/redis/v8` (v8.11.5; no MONITOR).
 - `example/` — a minimal host program that registers the UI and serves it.
 
 ## Usage
@@ -26,9 +29,11 @@ The library only stores and serves it:
 import (
     "github.com/redis/go-redis/v9"
     "embedRedisClient/redisui"
+    "embedRedisClient/redisui/goredisv9"
 )
 
 client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+// Register it as: Client: goredisv9.New(client)
 ```
 
 ### 2. Register the UI on your mux
@@ -41,7 +46,7 @@ err := redisui.Register(mux, redisui.Config{
     Prefix: "/redisui",
     Version: "myapp-1.2.3", // shown in the UI settings panel
     Connections: []redisui.Connection{
-        {ID: "local", Name: "Local Redis", Client: client, Enabled: true},
+        {ID: "local", Name: "Local Redis", Client: goredisv9.New(client), Enabled: true},
     },
 })
 if err != nil {
@@ -55,7 +60,8 @@ http.ListenAndServe(":8080", mux)
 - `ID` — unique identifier used in API paths. Must be unique per `Register`
   call; a duplicate makes `Register` return an error.
 - `Name` — display name shown in the UI.
-- `Client` — an injected `redis.UniversalClient`.
+- `Client` — an adapter implementing `redisui.Client`, built with
+  `goredisv9.New(c)` for a go-redis v9 client or `goredisv8.New(c)` for v8.
 - `Enabled` — when `false`, the connection is hidden from the UI list and its
   command / cluster / stream endpoints return `404`. Set it to toggle a
   connection on or off without removing it.
@@ -84,7 +90,7 @@ frontend catch-all — so you get uniform auth, logging, CORS, or rate limiting:
 ```go
 cfg := redisui.Config{
     Prefix: "/redisui",
-    Connections: []redisui.Connection{{ID: "local", Client: client, Enabled: true}},
+    Connections: []redisui.Connection{{ID: "local", Client: goredisv9.New(client), Enabled: true}},
     Middleware: func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             // The UI is loaded by navigating a browser to {prefix}/, and a
@@ -115,8 +121,8 @@ the right connection:
 - `db == 0` (the default) executes on the injected client exactly as-is — the
   db the host configured it with (0 in the common case) — so host-registered
   hooks and failover handling apply unchanged.
-- `db > 0` executes on a dedicated `redis.NewClient` built from a **copy** of
-  the injected `(*redis.Client).Options()` with `DB` overridden. Each db gets
+- `db > 0` executes on a dedicated client built by the adapter from a
+  **copy** of the injected client's `Options()` with `DB` overridden. Each db gets
   its own connection pool that issues `SELECT` when it dials, so no `SELECT`
   ever sticks to a pooled connection of the injected client and concurrent
   requests can never land in the wrong db. These clients are created lazily
@@ -135,6 +141,32 @@ does), and a per-db client derived from a sentinel-backed client pins the
 address it saw at first use. Hosts that prefer no db switching at all can
 register one `Connection` per database instead, each with its own client
 configured for that db; the UI then only operates db 0 per connection.
+
+## Go and go-redis versions
+
+The library requires **Go 1.23+**. The core `redisui` package does not import
+go-redis directly; version differences live in the adapters.
+
+- **v9 adapter** (`redisui/goredisv9`) pins `github.com/redis/go-redis/v9`
+  v9.18.x. Newer v9 releases raise the Go floor (v9.19+ needs Go 1.24, v9.23
+  needs Go 1.26); if the host upgrades go-redis, MVS selects the newer version
+  and the whole build follows that floor.
+- **v8 adapter** (`redisui/goredisv8`) uses `github.com/go-redis/redis/v8`
+  v8.11.5. go-redis v8 has no MONITOR command, so the Monitor tab returns a
+  clear "unsupported" error; commands, pub/sub, cluster nodes and per-db
+  routing work normally.
+- v8 and v9 are different import paths, so a single process can register both
+  kinds of connections.
+
+```go
+import (
+    v8 "github.com/go-redis/redis/v8"
+    "embedRedisClient/redisui/goredisv8"
+)
+
+c := v8.NewClient(&v8.Options{Addr: "localhost:6379"})
+// Connections: []redisui.Connection{{ID: "v8", Client: goredisv8.New(c), Enabled: true}}
+```
 
 ## Building the library
 
@@ -166,7 +198,9 @@ than Monaco, which also keeps the bundle much smaller.
 
 ```bash
 go test ./...          # Go tests (uses miniredis, no live Redis needed)
-go vet ./redisui
+go test -race ./...    # includes the v8/v9 adapters
+go vet ./...
+gofmt -l redisui/ example/
 cd redisui/web && npx vitest run   # frontend tests
 ```
 

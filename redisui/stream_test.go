@@ -14,6 +14,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/igm/sockjs-go/sockjs"
 	"github.com/redis/go-redis/v9"
+
+	"embedRedisClient/redisui/goredisv9"
 )
 
 // ----------------------------------------------------------------------------
@@ -170,12 +172,18 @@ func integrationRedisAddr(t *testing.T) string {
 	return addr
 }
 
-// realRedisUniversalClient returns a UniversalClient bound to the integration
-// Redis, or skips the test when it is unavailable.
-func realRedisUniversalClient(t *testing.T) redis.UniversalClient {
+// realRedisRawClient returns the unwrapped go-redis client bound to the
+// integration Redis, or skips the test when it is unavailable. Writers use it
+// for typed commands (Set/Publish); the client under test is wrapped.
+func realRedisRawClient(t *testing.T) *redis.Client {
 	t.Helper()
 	addr := integrationRedisAddr(t)
 	return redis.NewClient(&redis.Options{Addr: addr})
+}
+
+// realRedisClient returns the adapter the UI consumes.
+func realRedisClient(t *testing.T) Client {
+	return goredisv9.New(realRedisRawClient(t))
 }
 
 // ----------------------------------------------------------------------------
@@ -185,7 +193,7 @@ func realRedisUniversalClient(t *testing.T) redis.UniversalClient {
 func TestMonitorStreamsCommands(t *testing.T) {
 	// Must use a *redis.Client (the only concrete type MONITOR supports).
 	addr := integrationRedisAddr(t)
-	client := redis.NewClient(&redis.Options{Addr: addr})
+	client := goredisv9.New(redis.NewClient(&redis.Options{Addr: addr}))
 
 	events, stop, err := startMonitor(client)
 	if err != nil {
@@ -216,7 +224,7 @@ func TestMonitorStreamsCommands(t *testing.T) {
 }
 
 func TestSubscribeStreamsMessages(t *testing.T) {
-	client := realRedisUniversalClient(t)
+	client := realRedisClient(t)
 	events, stop, err := startSubscription(client, streamControl{Type: "subscribe", Channels: []string{"stream:chan"}})
 	if err != nil {
 		t.Fatalf("startSubscription: %v", err)
@@ -224,7 +232,7 @@ func TestSubscribeStreamsMessages(t *testing.T) {
 	defer stop()
 
 	time.Sleep(150 * time.Millisecond)
-	writer := realRedisUniversalClient(t)
+	writer := realRedisRawClient(t)
 	defer writer.Close()
 	if err := writer.Publish(context.Background(), "stream:chan", "hello-sub").Err(); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -244,7 +252,7 @@ func TestSubscribeStreamsMessages(t *testing.T) {
 }
 
 func TestPSubscribeStreamsMessages(t *testing.T) {
-	client := realRedisUniversalClient(t)
+	client := realRedisClient(t)
 	events, stop, err := startSubscription(client, streamControl{Type: "psubscribe", Patterns: []string{"stream:*"}})
 	if err != nil {
 		t.Fatalf("startSubscription: %v", err)
@@ -252,7 +260,7 @@ func TestPSubscribeStreamsMessages(t *testing.T) {
 	defer stop()
 
 	time.Sleep(150 * time.Millisecond)
-	writer := realRedisUniversalClient(t)
+	writer := realRedisRawClient(t)
 	defer writer.Close()
 	if err := writer.Publish(context.Background(), "stream:tech", "hello-psub").Err(); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -308,7 +316,7 @@ func (f *fakeSession) GetSessionState() sockjs.SessionState     { return sockjs.
 func (f *fakeSession) close()                                   { f.once.Do(func() { close(f.in) }) }
 
 func TestRunStreamEndToEnd(t *testing.T) {
-	client := realRedisUniversalClient(t)
+	client := realRedisClient(t)
 	sess := newFakeSession()
 
 	go func() {
@@ -318,7 +326,7 @@ func TestRunStreamEndToEnd(t *testing.T) {
 	// Start a subscribe mode.
 	sess.in <- `{"type":"subscribe","channels":["e2e:chan"]}`
 	time.Sleep(150 * time.Millisecond)
-	writer := realRedisUniversalClient(t)
+	writer := realRedisRawClient(t)
 	defer writer.Close()
 	if err := writer.Publish(context.Background(), "e2e:chan", "payload-1").Err(); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -366,7 +374,7 @@ func parseWSFrame(frame string) ([]string, error) {
 // client connects over WebSocket, subscribes to a channel, and receives the
 // published message as a stream event.
 func TestSockJSEndpointSubscribeOverWebSocket(t *testing.T) {
-	client := realRedisUniversalClient(t)
+	client := realRedisClient(t)
 	mux := commandServer(t, Connection{ID: "ws1", Name: "ws1", Client: client, Enabled: true})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -393,7 +401,7 @@ func TestSockJSEndpointSubscribeOverWebSocket(t *testing.T) {
 
 	// Let the subscription establish, then publish from a separate connection.
 	time.Sleep(150 * time.Millisecond)
-	writer := realRedisUniversalClient(t)
+	writer := realRedisRawClient(t)
 	defer writer.Close()
 	if err := writer.Publish(context.Background(), "wschan", "ws-hello").Err(); err != nil {
 		t.Fatalf("publish: %v", err)
