@@ -155,8 +155,8 @@ export default {
     font-size: 14px;
     height: calc(100vh - 231px);
   }
-  /*json in monaco editor*/
-  .key-content-string .text-formated-container .monaco-editor-con {
+  /*json in code editor*/
+  .key-content-string .text-formated-container .code-editor-con {
     height: calc(100vh - 275px);
   }
   .key-content-string .content-string-save-btn {

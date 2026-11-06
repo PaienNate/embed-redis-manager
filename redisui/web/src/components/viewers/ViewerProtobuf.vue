@@ -234,7 +234,7 @@ export default {
   }
 
   /*text viewer box*/
-  .key-content-string .text-formated-container.protobuf-viewer .monaco-editor-con {
+  .key-content-string .text-formated-container.protobuf-viewer .code-editor-con {
     height: calc(100vh - 331px);
   }
 </style>

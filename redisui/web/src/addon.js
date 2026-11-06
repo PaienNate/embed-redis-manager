@@ -15,7 +15,7 @@ export default {
   initFont() {
     const fontFamily = storage.getFontFamily();
     document.body.style.fontFamily = fontFamily;
-    // tell monaco editor
+    // tell code editors (CodeMirror) about the font
     bus.$emit('fontInited', fontFamily);
   },
   initZoom() {
