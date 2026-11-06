@@ -17,6 +17,11 @@ type (
 	Monitor = redisclient.Monitor
 	// Kind describes the topology of an injected Redis client.
 	Kind = redisclient.Kind
+	// Option is one display row in the connection-options card.
+	Option = redisclient.Option
+	// OptionsProvider is implemented by adapters that describe their client
+	// configuration.
+	OptionsProvider = redisclient.OptionsProvider
 )
 
 const (

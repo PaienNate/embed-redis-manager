@@ -237,6 +237,7 @@ func TestDisabledConnectionReturns404(t *testing.T) {
 	}{
 		{"command", http.MethodPost, "/r/api/redis/off/command", `{"cmd":"ping"}`},
 		{"cluster nodes", http.MethodGet, "/r/api/redis/off/cluster/nodes", ""},
+		{"options", http.MethodGet, "/r/api/redis/off/options", ""},
 		{"stream", http.MethodGet, "/r/api/redis/off/stream/", ""},
 	} {
 		req, err := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader(tc.body))

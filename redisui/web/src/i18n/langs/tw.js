@@ -22,6 +22,7 @@ const tw = {
     total_commands_processed: '歷史命令數',
     key_statistics: '鍵值統計',
     all_redis_info: 'Redis 資訊總覽',
+    connection_options: '連線設定',
     server: '伺服器',
     memory: '記憶體',
     stats: '狀態',

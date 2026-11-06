@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -99,6 +100,7 @@ func Register(mux *http.ServeMux, cfg Config) error {
 	mux.Handle("GET "+prefix+"/api/connections", s.wrap(http.HandlerFunc(s.handleConnections)))
 	mux.Handle("POST "+prefix+"/api/redis/{connID}/command", s.wrap(http.HandlerFunc(s.handleCommand)))
 	mux.Handle("GET "+prefix+"/api/redis/{connID}/cluster/nodes", s.wrap(http.HandlerFunc(s.handleClusterNodes)))
+	mux.Handle("GET "+prefix+"/api/redis/{connID}/options", s.wrap(http.HandlerFunc(s.handleConnectionOptions)))
 
 	// Build one SockJS handler per enabled connection. A single generic
 	// dispatcher below validates the connID and routes to the right handler
@@ -211,4 +213,58 @@ func (s *server) handleConnections(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// handleConnectionOptions serves GET {prefix}/api/redis/{connID}/options. It
+// describes the injected client's configuration (address, db, pool, timeouts,
+// TLS, ...) for the UI's connection-options card. It never exposes secrets:
+// passwords are reduced to a yes/no flag and TLS certificate material is not
+// serialized (only booleans/summary values).
+func (s *server) handleConnectionOptions(w http.ResponseWriter, r *http.Request) {
+	conn, ok := s.conns[r.PathValue("connID")]
+	if !ok || !conn.Enabled {
+		http.Error(w, "redisui: connection not found", http.StatusNotFound)
+		return
+	}
+	if conn.Client == nil {
+		http.Error(w, "redisui: connection has no client", http.StatusInternalServerError)
+		return
+	}
+
+	opts := []Option{{Key: "Kind", Value: kindLabel(conn.Client.Kind())}}
+	if p, ok := conn.Client.(OptionsProvider); ok {
+		opts = append(opts, p.Options()...)
+	}
+	// Custom Client implementations may not implement OptionsProvider; still
+	// show a best-effort address derived from HostPort().
+	if !hasOption(opts, "Address") && !hasOption(opts, "Addresses") {
+		if host, port := conn.Client.HostPort(); host != "" {
+			opts = append(opts, Option{Key: "Address", Value: net.JoinHostPort(host, port)})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(opts)
+}
+
+func kindLabel(k Kind) string {
+	switch k {
+	case KindSingle:
+		return "Single"
+	case KindCluster:
+		return "Cluster"
+	case KindRing:
+		return "Ring"
+	default:
+		return "Other"
+	}
+}
+
+func hasOption(opts []Option, key string) bool {
+	for _, o := range opts {
+		if o.Key == key {
+			return true
+		}
+	}
+	return false
 }

@@ -3,6 +3,7 @@ package goredisv8
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -118,6 +119,85 @@ func TestMonitorUnsupportedForNonSingle(t *testing.T) {
 	if _, err := c.Monitor(context.Background()); !errors.Is(err, redisclient.ErrMonitorUnsupported) {
 		t.Fatalf("Monitor Err = %v, want ErrMonitorUnsupported", err)
 	}
+}
+
+func TestOptions(t *testing.T) {
+	m := miniredis.RunT(t)
+	raw := redis.NewClient(&redis.Options{
+		Addr:      m.Addr(),
+		Username:  "bob",
+		Password:  "secret8",
+		DB:        2,
+		PoolSize:  5,
+		TLSConfig: &tls.Config{ServerName: "redis8.example", InsecureSkipVerify: true},
+	})
+	defer raw.Close()
+
+	opts := New(raw).(redisclient.OptionsProvider).Options()
+	got := make(map[string]string, len(opts))
+	for _, o := range opts {
+		got[o.Key] = o.Value
+		if strings.Contains(o.Value, "secret8") {
+			t.Fatalf("option %q leaked the password: %q", o.Key, o.Value)
+		}
+	}
+
+	want := map[string]string{
+		"Address":                  m.Addr(),
+		"DB":                       "2",
+		"Username":                 "bob",
+		"Password Set":             "yes",
+		"Pool Size":                "5",
+		"TLS":                      "on",
+		"TLS Server Name":          "redis8.example",
+		"TLS Insecure Skip Verify": "yes",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	if _, ok := got["Protocol"]; ok {
+		t.Fatalf("v8 options must not expose Protocol: %q", got["Protocol"])
+	}
+}
+
+func TestClusterAndRingOptions(t *testing.T) {
+	cc := redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs:        []string{"127.0.0.1:7000", "127.0.0.1:7001"},
+		MaxRedirects: 5,
+	})
+	defer cc.Close()
+	got := optionMap(New(cc).(redisclient.OptionsProvider).Options())
+	if got["Addresses"] != "127.0.0.1:7000, 127.0.0.1:7001" {
+		t.Errorf("cluster Addresses = %q", got["Addresses"])
+	}
+	if got["Max Redirects"] != "5" {
+		t.Errorf("Max Redirects = %q, want 5", got["Max Redirects"])
+	}
+	if got["Pool Size (per node)"] == "" {
+		t.Error("cluster options missing Pool Size (per node)")
+	}
+
+	ring := redis.NewRing(&redis.RingOptions{
+		Addrs: map[string]string{"b": "127.0.0.1:7001", "a": "127.0.0.1:7000"},
+	})
+	defer ring.Close()
+	got = optionMap(New(ring).(redisclient.OptionsProvider).Options())
+	if got["Addresses"] != "127.0.0.1:7000, 127.0.0.1:7001" {
+		t.Errorf("ring Addresses = %q (want sorted)", got["Addresses"])
+	}
+	if got["Heartbeat Frequency"] == "" {
+		t.Error("ring options missing Heartbeat Frequency")
+	}
+}
+
+func optionMap(opts []redisclient.Option) map[string]string {
+	m := make(map[string]string, len(opts))
+	for _, o := range opts {
+		m[o.Key] = o.Value
+	}
+	return m
 }
 
 // TestRawMonitorProtocol exercises the RESP handshake (AUTH/SELECT/MONITOR)

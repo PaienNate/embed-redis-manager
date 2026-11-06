@@ -70,6 +70,11 @@ http.ListenAndServe(":8080", mux)
 back to the library's `redisui.Version`; set it to surface the host
 application's version instead.
 
+The Status tab also shows a **Connection Options** card describing the
+injected client (address, db, pool, timeouts, TLS, protocol, ...). Passwords
+are reduced to a "Password Set" flag and TLS certificate material is never
+serialized; only booleans/summary values are exposed.
+
 ### 3. Configure the prefix
 
 `Prefix` may include a leading slash or not (`/redisui` or `redisui`); it

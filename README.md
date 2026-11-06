@@ -6,6 +6,7 @@
 
 - **注入式连接**：宿主注入已初始化的 go-redis client（v9 用 `goredisv9.New`、v8 用 `goredisv8.New`），库不建连接。
 - **双版本适配**：核心 `redisui` 不直接依赖 go-redis；v8 / v9 适配器可共存，库本体要求 **Go 1.23+**。
+- **连接配置**：Redis 信息页展示注入 client 的 `Options`（地址、DB、连接池、超时、TLS、协议等）；密码只显示“是否设置”，TLS 证书只显示摘要。
 - **同源 SPA**：前端构建产物用 `go:embed` 打进二进制，挂到 `{prefix}/`，API 在 `{prefix}/api`。
 - **功能齐全**：key 浏览/搜索、string/hash/list/set/zset 查看编辑、CLI、stream/rejson/TS/vector、集群节点、监控、导入导出。
 - **流式**：MONITOR / pub-sub 走 SockJS（自动 WebSocket→XHR-streaming→XHR-polling 降级），适配受限网络。

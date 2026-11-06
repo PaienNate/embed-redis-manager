@@ -280,6 +280,15 @@ func TestEnabledToggleShowsOrHidesConnection(t *testing.T) {
 		t.Fatalf("stream on disabled conn status = %d, want 404; body=%s",
 			stRec.Code, stRec.Body.String())
 	}
+
+	// Options on a disabled connection must 404.
+	optReq := httptest.NewRequest(http.MethodGet, "/r/api/redis/off/options", nil)
+	optRec := httptest.NewRecorder()
+	mux.ServeHTTP(optRec, optReq)
+	if optRec.Code != http.StatusNotFound {
+		t.Fatalf("options on disabled conn status = %d, want 404; body=%s",
+			optRec.Code, optRec.Body.String())
+	}
 }
 
 func TestRegisterNilMuxErrors(t *testing.T) {

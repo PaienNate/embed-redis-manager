@@ -288,6 +288,19 @@ export default class HttpRedisClient {
     return nodes;
   }
 
+  async connectionOptions() {
+    // GET {apiBase}/redis/{connID}/options. Describes the injected client's
+    // configuration (address, db, pool, timeouts, TLS, ...) for the Status tab.
+    // Passwords are reduced to a "Password Set: yes/no" flag by the backend.
+    const url = `${this.apiBase}/redis/${this.connID}/options`;
+    try {
+      const resp = await axios.get(url, { timeout: REQUEST_TIMEOUT_MS });
+      return Array.isArray(resp.data) ? resp.data : [];
+    } catch (e) {
+      throw httpError(e);
+    }
+  }
+
   ping() {
     return this.call('PING');
   }

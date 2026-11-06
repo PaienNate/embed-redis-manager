@@ -94,6 +94,19 @@ type Monitor interface {
 	Stop()
 }
 
+// Option is one display row in the UI's connection-options card.
+type Option struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// OptionsProvider is implemented by adapters that can describe the underlying
+// client configuration. It is optional: the core falls back to Kind/HostPort
+// for custom Client implementations that do not implement it.
+type OptionsProvider interface {
+	Options() []Option
+}
+
 // NewCommand builds a Command from an already-read reply. Adapters use it to
 // translate their go-redis nil sentinel into ErrNil.
 func NewCommand(val interface{}, err error) Command {

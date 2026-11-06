@@ -22,6 +22,7 @@ const en = {
     total_commands_processed: 'Total Commands',
     key_statistics: 'Key Statistics',
     all_redis_info: 'All Redis Info',
+    connection_options: 'Connection Options',
     server: 'Server',
     memory: 'Memory',
     stats: 'Stats',

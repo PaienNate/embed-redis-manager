@@ -113,6 +113,36 @@
     </el-col>
   </el-row>
 
+  <!-- client options -->
+  <el-row v-if="connectionOptions.length" class="status-card">
+    <el-col>
+      <el-card class="box-card">
+        <div slot="header">
+          <i class="fa fa-sliders"></i>
+          <span>{{ $t('message.connection_options') }}</span>
+        </div>
+
+        <el-table
+          :data="connectionOptions"
+          size="mini"
+          border
+          max-height="420"
+          style="width: 100%">
+          <el-table-column
+            prop="key"
+            label="Key"
+            width="240">
+          </el-table-column>
+          <el-table-column
+            prop="value"
+            label="Value"
+            show-overflow-tooltip>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </el-col>
+  </el-row>
+
   <!-- cluster key statistics -->
   <el-row class="status-card">
     <el-col>
@@ -207,6 +237,8 @@ export default {
       connectionStatus: {},
       allInfoFilter: '',
       DBKeys: [],
+      connectionOptions: [],
+      connectionOptionsFor: null,
     };
   },
   props: ['client', 'hotKeyScope'],
@@ -241,6 +273,7 @@ export default {
     initShow() {
       // set global info dict
       this.client.ardmInfo = {};
+      this.fetchConnectionOptions();
 
       this.client.info().then((reply) => {
         this.connectionStatus = this.initStatus(reply);
@@ -265,6 +298,24 @@ export default {
         else if (e.message.includes('NOAUTH')) {} else {
           this.$message.error(e.message);
         }
+      });
+    },
+    fetchConnectionOptions() {
+      const client = this.client;
+      if (!client || typeof client.connectionOptions !== 'function') {
+        return;
+      }
+      // Options are fixed at injection time; fetch once per connection even
+      // when the auto-refresh timer keeps calling initShow().
+      if (this.connectionOptionsFor === client.connID) {
+        return;
+      }
+      this.connectionOptionsFor = client.connID;
+      client.connectionOptions().then((opts) => {
+        this.connectionOptions = Array.isArray(opts) ? opts : [];
+      }).catch(() => {
+        // Older backend without /options: keep the card hidden.
+        this.connectionOptions = [];
       });
     },
     refreshInit() {

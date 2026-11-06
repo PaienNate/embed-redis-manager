@@ -22,6 +22,7 @@ const cn = {
     total_commands_processed: '历史命令数',
     key_statistics: '键值统计',
     all_redis_info: 'Redis信息全集',
+    connection_options: '连接配置',
     server: '服务器',
     memory: '内存',
     stats: '状态',

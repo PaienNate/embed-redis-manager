@@ -45,6 +45,7 @@ const ICONS = [
   'fa-search',
   'fa-server',
   'fa-sitemap',
+  'fa-sliders',
   'fa-table',
   'fa-terminal',
   'fa-thermometer-three-quarters',
