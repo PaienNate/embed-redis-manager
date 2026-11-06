@@ -30,7 +30,11 @@ function applyTheme(theme) {
     link = document.createElement('link');
     link.id = 'theme-link';
     link.rel = 'stylesheet';
-    document.head.appendChild(link);
+    // Insert BEFORE the app's bundled CSS so app-level overrides of Element
+    // styles (equal specificity, e.g. `.status-filter-input { width:100px }`
+    // vs Element's `.el-input { width:100% }`) win. Appending here would let the
+    // theme stylesheet win the cascade and break many layout tweaks.
+    document.head.insertBefore(link, document.head.firstChild);
   }
   link.href = THEME_CSS[t];
   document.body.classList.toggle('dark-mode', t === 'dark');

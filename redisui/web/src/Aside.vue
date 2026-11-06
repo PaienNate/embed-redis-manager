@@ -64,6 +64,12 @@ export default {
 <style type="text/css">
   .aside-top-container {
     margin-right: 8px;
+    /* The embedded build removed the (non-floated) "New Connection" button,
+       leaving only float:right buttons here. Without containing those floats
+       this container collapses to 0 height and the next sibling
+       (.connections-wrap, an overflow:auto BFC) shrinks to avoid the float —
+       collapsing the whole connection/key list to a narrow column. */
+    display: flow-root;
   }
   .aside-top-container .aside-new-connection-container {
     margin-right: 109px;
