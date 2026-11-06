@@ -8,29 +8,29 @@ import (
 	"net/http"
 	"os"
 
+	v8 "github.com/go-redis/redis/v8"
 	"github.com/redis/go-redis/v9"
 
 	"embedRedisClient/redisui"
+	"embedRedisClient/redisui/goredisv8"
 	"embedRedisClient/redisui/goredisv9"
 )
 
 func main() {
-	// The host owns the client and its lifecycle; the library only stores and
-	// serves it. Point this at your Redis (or use a *redis.ClusterClient /
-	// *redis.Ring) and wrap it with goredisv9.New (or goredisv8.New for a v8
-	// client). Set a running Redis at localhost:6379 to see it work.
-	client := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "", // no password
-		DB:       0,
-	})
+	// The host owns the clients and their lifecycle; the library only stores and
+	// serves them. This example registers the same Redis twice — once through
+	// the go-redis v9 adapter and once through v8 — so you can compare both.
+	// Point these at your Redis (or use *redis.ClusterClient / *redis.Ring).
+	v9Client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	v8Client := v8.NewClient(&v8.Options{Addr: "localhost:6379"})
 
 	mux := http.NewServeMux()
 	err := redisui.Register(mux, redisui.Config{
 		Prefix:  "/redisui", // defaults to "/redisui" when empty
 		Version: "example-1.0.0",
 		Connections: []redisui.Connection{
-			{ID: "local", Name: "Local Redis", Client: goredisv9.New(client), Enabled: true},
+			{ID: "v9", Name: "Redis v9", Client: goredisv9.New(v9Client), Enabled: true},
+			{ID: "v8", Name: "Redis v8", Client: goredisv8.New(v8Client), Enabled: true},
 		},
 		// Optional: plug in auth/logging/CORS. When set, the middleware wraps
 		// every route under the prefix — connections, generic command, cluster

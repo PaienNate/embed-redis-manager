@@ -1,7 +1,9 @@
 # Example host program
 
 `main.go` is a minimal host program that embeds the Redis UI into its own
-`net/http` mux.
+`net/http` mux. It registers the same Redis twice — once through the go-redis
+v9 adapter (`goredisv9.New`) and once through v8 (`goredisv8.New`) — so both
+adapters can be compared side by side in the connection list.
 
 ## Run
 
