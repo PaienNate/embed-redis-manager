@@ -154,7 +154,10 @@ export default {
       globalChangeTheme(this.themeMode);
     },
     changeZoom() {
-      // window/zoom factor is an Electron concept, noop in a browser build
+      // Live preview; the value is persisted by saveSettings() and re-applied
+      // on load by addon.initZoom().
+      const z = parseFloat(this.form.zoomFactor) || 1;
+      document.body.style.zoom = String(z);
     },
     clearCache() {
       this.$confirm(this.$t('message.clear_cache_tip')).then(() => {

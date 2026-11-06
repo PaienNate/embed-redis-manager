@@ -19,7 +19,10 @@ export default {
     bus.$emit('fontInited', fontFamily);
   },
   initZoom() {
-    // window zoom is not applicable in a browser, noop
+    // Electron's webFrame zoom is gone; apply a CSS zoom to the page instead
+    // (supported by Chromium/IE11 and modern Firefox).
+    const z = parseFloat(storage.getSetting('zoomFactor')) || 1;
+    document.body.style.zoom = String(z);
   },
   openHrefInBrowser() {
     document.addEventListener('click', (event) => {
