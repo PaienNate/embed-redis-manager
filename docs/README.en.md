@@ -152,9 +152,11 @@ go-redis directly; version differences live in the adapters.
   needs Go 1.26); if the host upgrades go-redis, MVS selects the newer version
   and the whole build follows that floor.
 - **v8 adapter** (`redisui/goredisv8`) uses `github.com/go-redis/redis/v8`
-  v8.11.5. go-redis v8 has no MONITOR command, so the Monitor tab returns a
-  clear "unsupported" error; commands, pub/sub, cluster nodes and per-db
-  routing work normally.
+  v8.11.5. go-redis v8 has no built-in Monitor helper, so the adapter
+  implements MONITOR over a dedicated RESP2 connection (AUTH/SELECT/MONITOR
+  using the injected client's `Options`). It supports single-node clients;
+  cluster/ring still return `ErrMonitorUnsupported`. Commands, pub/sub,
+  cluster nodes and per-db routing work normally.
 - v8 and v9 are different import paths, so a single process can register both
   kinds of connections.
 

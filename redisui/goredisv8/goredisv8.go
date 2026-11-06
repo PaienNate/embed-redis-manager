@@ -1,8 +1,8 @@
 // Package goredisv8 adapts github.com/go-redis/redis/v8 clients to the
 // redisui.Client interface.
 //
-// go-redis v8 has no MONITOR command, so Client.Monitor returns
-// redisclient.ErrMonitorUnsupported; every other UI feature works normally.
+// go-redis v8 has no Monitor command, so Client.Monitor is implemented over a
+// dedicated RESP2 connection using the injected client's Options.
 package goredisv8
 
 import (
@@ -105,8 +105,12 @@ func (c *client) PSubscribe(ctx context.Context, patterns ...string) redisclient
 	return newSubscription(c.rc.PSubscribe(ctx, patterns...))
 }
 
-func (c *client) Monitor(context.Context) (redisclient.Monitor, error) {
-	return nil, redisclient.ErrMonitorUnsupported
+func (c *client) Monitor(ctx context.Context) (redisclient.Monitor, error) {
+	rc, ok := c.rc.(*redis.Client)
+	if !ok {
+		return nil, redisclient.ErrMonitorUnsupported
+	}
+	return startRawMonitor(ctx, rc.Options())
 }
 
 // subscription pumps one go-redis PubSub into redisclient.Message values.

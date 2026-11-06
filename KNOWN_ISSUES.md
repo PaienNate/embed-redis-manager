@@ -18,7 +18,7 @@
 
 ## 二、已知限制 / 边界
 
-- **MONITOR 仅由 v9 适配器提供，且仅支持单节点 `*redis.Client`**：`*redis.ClusterClient` / `*redis.Ring` 会返回 `ErrMonitorUnsupported`（pub/sub 订阅仍可用）。**v8 适配器没有 MONITOR**（go-redis v8 无该命令），Monitor 页同样返回不支持。
+- **MONITOR 仅支持单节点 `*redis.Client`**：v9 adapter 用“专用 client + 粘性连接”，v8 adapter 用原生 RESP2 连接自己实现（go-redis v8 没有现成 helper）。`*redis.ClusterClient` / `*redis.Ring` 仍返回 `ErrMonitorUnsupported`（pub/sub 订阅可用）。
 - **Go 版本与 go-redis 版本绑定**：库本体要求 **Go 1.23+**；v9 适配器钉 `go-redis v9.18.x`（v9.19+ 要 Go 1.24，v9.23 要 Go 1.26）。宿主如果自行升级 go-redis，MVS 会选高版本，Go 下限随之提高；v8 适配器用 `github.com/go-redis/redis/v8 v8.11.5`。
 - **危险命令未拦截**：`POST /command` 可执行 `FLUSHALL`/`DEBUG`/`SHUTDOWN` 等。安全边界是宿主鉴权；如需只读，宿主在 Middleware 里过滤，或后续考虑加 `Config.ReadOnly`/命令白名单。
 - **阻塞命令（`BLPOP key 0` 等）**：走 HTTP 端点会在 go-redis 读超时后报错；如需阻塞命令请用其它通道。
@@ -45,6 +45,7 @@
 
 - 核心不再直接依赖 go-redis：新增叶子接口包 `redisui/redisclient`、v9 适配器 `redisui/goredisv9`、v8 适配器 `redisui/goredisv8`；`go.mod` 降到 `go 1.23.0` + go-redis v9.18.0，`Connection.Client` 类型改为 `redisui.Client`（宿主用 `goredisv9.New` / `goredisv8.New` 包一层）。
 - v9 MONITOR 改为“专用 client + 粘性连接”，不再依赖 v9.23 的 `EphemeralConn`；同时禁用派生 client 的维护通知，修复 `-race` 下 `bufio.Reader` 的竞态。
+- v8 适配器补上 MONITOR：用 `Options()` 的 Dialer/TLS/Username/Password/DB 开专用 RESP2 连接，发 AUTH/SELECT/MONITOR 并逐行读取；不再对单节点返回 `ErrMonitorUnsupported`（cluster/ring 除外）。
 - 命令日志已接线（`setCommandLogSink` 转发每条命令到 `CommandLog`，ping 过滤）。
 - 版本号由后端 `Config.Version` 注入，设置页显示；移除检查更新/手动下载，增加致谢链接。
 - 连接 tooltip 的 host/port 由后端从注入 client 的 `Options().Addr` 派生（standalone/failover 用 `Addr`，cluster/ring 取首个地址），不再显示 `Host: undefined`。

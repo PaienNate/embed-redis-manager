@@ -49,7 +49,7 @@ gofmt -l redisui/ example/                       # 必须为空
 8. **客户端适配层**：`Connection.Client` 是 `redisui.Client`（`redisui/redisclient` 的别名），不是 `redis.UniversalClient`。核心包**不要 import go-redis**；版本相关逻辑只放 `redisui/goredisv9` / `redisui/goredisv8`。宿主用 `goredisv9.New(c)` / `goredisv8.New(c)` 包一层。新增能力时先改 `redisclient.Client` 接口，再改两个 adapter 和测试 helper。
    - v9 MONITOR 用“专用 client + 粘性连接”；`Stop()` 里**只 `cli.Close()`，不要 `conn.Close()`**——后者会走 `pool.putConn -> HasBufferedData`，和 `readMonitor` 的 `bufio.Reader` 抢写，`-race` 必现。
    - 派生 client（db/MONITOR）用独立的 `MaintNotificationsConfig{Mode: disabled}`，不要直接共享宿主的 `Options` 指针。
-   - v8 没有 MONITOR，`Monitor` 返回 `ErrMonitorUnsupported`；不要为它伪造。
+   - v8 没有 go-redis 的 Monitor helper，adapter 用原生 RESP2 连接实现（`goredisv8/monitor.go`）：用 `Options()` 的 Dialer/TLS/Username/Password/DB 发 AUTH/SELECT/MONITOR，逐行读；只有 cluster/ring/非 `*redis.Client` 才返回 `ErrMonitorUnsupported`。
 
 ## 提交规范
 

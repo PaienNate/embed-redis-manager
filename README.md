@@ -50,7 +50,7 @@ func main() {
 
 - 库本体要求 **Go 1.23+**；核心 `redisui` 不再直接依赖 go-redis，版本差异全部收敛在适配器里。
 - **v9 适配器**（`redisui/goredisv9`）：依赖 `github.com/redis/go-redis/v9 v9.18.x`。注意 v9.19+ 要求 Go 1.24，v9.23 要求 Go 1.26；宿主如果自行升级 go-redis，MVS 会选高版本，Go 下限也随之提高。
-- **v8 适配器**（`redisui/goredisv8`）：依赖 `github.com/go-redis/redis/v8 v8.11.5`。v8 没有 MONITOR 命令，Monitor 页会明确返回“不支持”；命令、订阅、集群节点、多 db 均正常。
+- **v8 适配器**（`redisui/goredisv8`）：依赖 `github.com/go-redis/redis/v8 v8.11.5`。go-redis v8 没有现成的 Monitor helper，adapter 用原生 RESP2 连接实现 MONITOR（仅单节点）；命令、订阅、集群节点、多 db 均正常。
 - v8 和 v9 是不同 import path，**同一个进程可以同时注册两种连接**。
 
 ```go
