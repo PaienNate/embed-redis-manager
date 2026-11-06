@@ -219,22 +219,38 @@ export default {
       });
     },
     solveList(list) {
-      if (!list) {
+      if (!list || !list.length) {
         return [];
       }
 
+      // Binary mode returns Buffers; coerce scalar values to plain strings.
+      const toStr = (v) => (v && typeof v === 'object' && typeof v.toString === 'function'
+        ? v.toString()
+        : v);
+
       const zsetData = [];
 
-      for (let i = 0; i < list.length; i += 2) {
-        // scores come back as Buffers in binary mode; coerce to number safely.
-        const raw = list[i + 1];
-        const score = typeof raw === 'object' && raw !== null && raw.toString
-          ? raw.toString()
-          : raw;
-        zsetData.push({
-          score: Number(score),
-          member: list[i],
-        });
+      // WITHSCORES replies come in two shapes depending on the transport:
+      //   - nested pairs `[[member, score], ...]`      (go-redis/RESP3, ZRANGE)
+      //   - flat `[member, score, member, score, ...]` (ioredis/RESP2, ZSCAN)
+      // Handle both, otherwise the score would be an array -> Number() -> NaN.
+      if (Array.isArray(list[0])) {
+        for (const pair of list) {
+          if (!pair || pair.length < 2) {
+            continue;
+          }
+          zsetData.push({
+            score: Number(toStr(pair[1])),
+            member: toStr(pair[0]),
+          });
+        }
+      } else {
+        for (let i = 0; i < list.length; i += 2) {
+          zsetData.push({
+            score: Number(toStr(list[i + 1])),
+            member: toStr(list[i]),
+          });
+        }
       }
 
       return zsetData;
